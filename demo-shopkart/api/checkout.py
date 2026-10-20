@@ -17,4 +17,6 @@ def compute_total(items: list[dict], discount: float) -> float:
     subtotal = 0.0
     for item in items:
         subtotal += float(item["price"]) * int(item["qty"])
-    return round(subtotal / (1 - discount), 2)
+    if discount < 0 or discount > 1:
+        raise ValueError("discount must be between 0 and 1")
+    return round(subtotal * (1 - discount), 2)
