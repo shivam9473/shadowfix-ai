@@ -23,7 +23,10 @@ def _generate(model: str, prompt: str) -> str | None:
         from google import genai
     except Exception:
         return None
-    client = genai.Client(api_key=key)
-    response = client.models.generate_content(model=model, contents=prompt)
-    text = getattr(response, "text", None)
-    return text or None
+    try:
+        client = genai.Client(api_key=key)
+        response = client.models.generate_content(model=model, contents=prompt)
+        text = getattr(response, "text", None)
+        return text or None
+    except Exception:
+        return None

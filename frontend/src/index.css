@@ -1,15 +1,24 @@
 @import "tailwindcss";
 
 @theme {
-  --font-sans: "Instrument Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Manrope", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, monospace;
-  --color-ink: #10110f;
-  --color-panel: #171914;
-  --color-line: #30352b;
-  --color-lime: #d6ff4a;
-  --color-paper: #f3f0e7;
-  --color-mute: #a39e90;
-  --color-heat: #ff4d2e;
+
+  --color-ink: #0a0816;
+  --color-ink-2: #0f0c20;
+  --color-panel: #130f26;
+  --color-panel-2: #1a1535;
+  --color-line: #2b2550;
+  --color-brand: #8b5cf6;
+  --color-brand-deep: #6d3df0;
+  --color-mint: #5eead4;
+  --color-paper: #f4f2ff;
+  --color-mute: #9f9abd;
+  --color-heat: #ff5f4d;
+}
+
+html {
+  scroll-behavior: smooth;
 }
 
 body {
@@ -17,10 +26,101 @@ body {
   background: var(--color-ink);
   color: var(--color-paper);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+@layer base {
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-mint);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+/* Soft violet glow behind the hero and the final call to action */
+.glow-top {
+  background:
+    radial-gradient(60rem 28rem at 50% -8rem, rgb(139 92 246 / 0.32), transparent 70%),
+    radial-gradient(28rem 16rem at 85% 6rem, rgb(94 234 212 / 0.1), transparent 70%);
+}
+
+.glow-bottom {
+  background: radial-gradient(48rem 20rem at 50% 100%, rgb(139 92 246 / 0.28), transparent 70%);
+}
+
+/* Subtle dotted grid used on feature art panels */
+.dots {
+  background-image: radial-gradient(rgb(159 154 189 / 0.18) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/* Gradient border card */
+.card {
+  background: linear-gradient(180deg, var(--color-panel-2), var(--color-panel));
+  border: 1px solid var(--color-line);
+  border-radius: 1.25rem;
+}
+
+/* Infinite marquee of the stack the agents are built on */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 38s linear infinite;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+/* One entrance on first load: the hero product card rises into place */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.rise {
+  animation: rise 0.8s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  .marquee-track,
+  .rise {
+    animation: none;
+  }
+}
+
+details > summary {
+  list-style: none;
+}
+details > summary::-webkit-details-marker {
+  display: none;
 }
 
 .react-flow__controls-button {
-  background: #171914;
-  border-bottom-color: #30352b;
-  fill: #f3f0e7;
+  background: #130f26;
+  border-bottom-color: #2b2550;
+  fill: #f4f2ff;
 }

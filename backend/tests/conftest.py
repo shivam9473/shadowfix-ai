@@ -7,3 +7,5 @@ os.environ.pop("GITHUB_TOKEN", None)
 os.environ.pop("SHADOWFIX_OPEN_PR", None)
 os.environ.pop("E2B_API_KEY", None)
 os.environ.pop("SHADOWFIX_DEPLOY_ROLE_ARN", None)
+os.environ.pop("RESEND_WEBHOOK_SECRET", None)
+

@@ -90,7 +90,8 @@ def health() -> dict:
 
 
 @app.post("/api/demo/run")
-async def demo_run() -> dict:
+@app.post("/api/trigger-bug")
+async def demo_run(request: Request = None) -> dict:
     admin: SuperAdmin = app.state.admin
     if admin.killed:
         raise HTTPException(status_code=423, detail="kill switch is on")

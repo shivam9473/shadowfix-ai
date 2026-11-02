@@ -11,10 +11,10 @@ const ORDER = [
 ];
 
 function tone(status) {
-  if (status === "done") return "#d6ff4a";
-  if (status === "running") return "#f3f0e7";
+  if (status === "done") return "#5eead4";
+  if (status === "running") return "#f4f2ff";
   if (status === "failed" || status === "halted") return "#ff4d2e";
-  return "#30352b";
+  return "#2b2550";
 }
 
 export default function ReactFlowGraph({ events = [], status = "queued" }) {
@@ -27,8 +27,8 @@ export default function ReactFlowGraph({ events = [], status = "queued" }) {
     position: { x: index * 170, y: 40 },
     data: { label: `${label}\n${byStage[id] || "waiting"}` },
     style: {
-      background: "#171914",
-      color: "#f3f0e7",
+      background: "#130f26",
+      color: "#f4f2ff",
       border: `1px solid ${tone(byStage[id])}`,
       width: 140,
       fontSize: 12,
@@ -42,13 +42,13 @@ export default function ReactFlowGraph({ events = [], status = "queued" }) {
     source: id,
     target: ORDER[index + 1][0],
     animated: byStage[id] === "done" && byStage[ORDER[index + 1][0]] !== "done",
-    style: { stroke: "#a39e90" },
+    style: { stroke: "#9f9abd" },
   }));
 
   return (
-    <div className="h-64 rounded-lg border border-line bg-ink">
+    <div className="h-64 rounded-2xl border border-line bg-ink-2">
       <ReactFlow nodes={nodes} edges={edges} fitView proOptions={{ hideAttribution: true }}>
-        <Background color="#30352b" gap={18} />
+        <Background color="#2b2550" gap={18} />
         <Controls />
       </ReactFlow>
     </div>

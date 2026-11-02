@@ -30,7 +30,7 @@ export default function IncidentRoom() {
       </div>
       {incident?.status === "awaiting_approval" && (
         <p className="mt-4 text-sm text-mute">
-          The patch is waiting in the <Link to="/console" className="text-lime">admin console</Link>.
+          The patch is waiting in the <Link to="/console" className="text-mint">admin console</Link>.
           Approval is the only path that mints credentials.
         </p>
       )}

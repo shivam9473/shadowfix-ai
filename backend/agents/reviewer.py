@@ -96,23 +96,32 @@ def _pull_request(coder: dict, score: int) -> dict[str, Any]:
     if not token or not repository or not publish:
         return {"status": "preview", "title": title, "body": body, "url": ""}
 
-    from github import Github
-
-    owner, name = repository.split("/", 1)
-    repo = Github(token).get_repo(f"{owner}/{name}")
-    base = os.getenv("GITHUB_BASE_BRANCH", "main")
-    branch = "shadowfix/checkout-coupon"
-    source = repo.get_git_ref(f"heads/{base}")
     try:
-        repo.create_git_ref(ref=f"refs/heads/{branch}", sha=source.object.sha)
-    except Exception:
-        pass
-    repo.update_file(
-        "demo-shopkart/api/checkout.py",
-        title,
-        coder["patched"],
-        repo.get_contents("demo-shopkart/api/checkout.py", ref=branch).sha,
-        branch=branch,
-    )
-    pull = repo.create_pull(title=title, body=body, head=branch, base=base)
-    return {"status": "opened", "title": title, "body": body, "url": pull.html_url}
+        from github import Github
+
+        owner, name = repository.split("/", 1)
+        repo = Github(token).get_repo(f"{owner}/{name}")
+        base = os.getenv("GITHUB_BASE_BRANCH", "main")
+        branch = "shadowfix/checkout-coupon"
+        source = repo.get_git_ref(f"heads/{base}")
+        try:
+            repo.create_git_ref(ref=f"refs/heads/{branch}", sha=source.object.sha)
+        except Exception:
+            pass
+        repo.update_file(
+            "demo-shopkart/api/checkout.py",
+            title,
+            coder["patched"],
+            repo.get_contents("demo-shopkart/api/checkout.py", ref=branch).sha,
+            branch=branch,
+        )
+        try:
+            pull = repo.create_pull(title=title, body=body, head=branch, base=base)
+            return {"status": "opened", "title": title, "body": body, "url": pull.html_url}
+        except Exception as pull_err:
+            pulls = list(repo.get_pulls(head=f"{owner}:{branch}", state="open"))
+            if pulls:
+                return {"status": "opened", "title": title, "body": body, "url": pulls[0].html_url}
+            raise pull_err
+    except Exception as exc:
+        return {"status": "preview", "title": title, "body": body, "url": "", "error": str(exc)}
