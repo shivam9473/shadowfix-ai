@@ -9,7 +9,7 @@ from paths import REPO_ROOT
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=str(REPO_ROOT / ".env"),
+        env_file=None if os.getenv("SHADOWFIX_ENV") == "test" else str(REPO_ROOT / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     github_token: str = ""
     github_repository: str = ""
     github_base_branch: str = "main"
+    shadowfix_open_pr: bool = False
     shadowfix_deploy_role_arn: str = ""
     shadowfix_deploy_bucket: str = ""
     resend_webhook_secret: str = ""
@@ -42,7 +43,26 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    mapping = {
+        "E2B_API_KEY": settings.e2b_api_key,
+        "GEMINI_API_KEY": settings.gemini_api_key,
+        "MEM0_API_KEY": settings.mem0_api_key,
+        "GITHUB_TOKEN": settings.github_token,
+        "GITHUB_REPOSITORY": settings.github_repository,
+        "GITHUB_BASE_BRANCH": settings.github_base_branch,
+        "SHADOWFIX_OPEN_PR": "true" if settings.shadowfix_open_pr else "",
+        "RESEND_WEBHOOK_SECRET": settings.resend_webhook_secret,
+        "SHADOWFIX_DEPLOY_ROLE_ARN": settings.shadowfix_deploy_role_arn,
+        "SHADOWFIX_DEPLOY_BUCKET": settings.shadowfix_deploy_bucket,
+        "TEMPORAL_ADDRESS": settings.temporal_address,
+        "TOXIPROXY_API": settings.toxiproxy_api,
+        "SHOPKART_URL": settings.shopkart_url,
+    }
+    for key, val in mapping.items():
+        if val:
+            os.environ[key] = val
+    return settings
 
 
 def reload_settings() -> Settings:

@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { adminFetch, runDemo } from "../api";
+import { ADMIN_KEY_STORAGE } from "../auth";
 import MonacoDiffViewer from "../components/MonacoDiffViewer";
 
 const TABS = ["Incidents", "Knowledge", "Memory", "Security", "Visitors", "Audit"];
 
 export default function SuperAdminConsole() {
-  const [adminKey, setAdminKey] = useState("change-me");
+  const [adminKey, setAdminKey] = useState(() => sessionStorage.getItem(ADMIN_KEY_STORAGE) || "Shadowfix@4321");
   const [dossier, setDossier] = useState(null);
   const [tab, setTab] = useState("Incidents");
   const [selected, setSelected] = useState("");
@@ -78,7 +79,7 @@ export default function SuperAdminConsole() {
     <main className="mx-auto max-w-7xl px-6 py-8">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <p className="font-mono text-xs tracking-[0.16em] text-lime">SUPER ADMIN</p>
+          <p className="font-mono text-xs tracking-[0.16em] text-mint">SUPER ADMIN</p>
           <h1 className="mt-2 text-3xl">Full desk</h1>
           <p className="mt-2 max-w-2xl text-sm text-mute">
             Every incident, agent report, indexed file, memory note, visitor, and approval lives here.
@@ -86,7 +87,7 @@ export default function SuperAdminConsole() {
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
-          <button type="button" onClick={reproduce} disabled={busy} className="rounded-full bg-lime px-4 py-2 text-sm font-semibold text-ink disabled:opacity-60">
+          <button type="button" onClick={reproduce} disabled={busy} className="rounded-full bg-mint px-4 py-2 text-sm font-semibold text-ink disabled:opacity-60">
             {busy ? "Starting" : "Run Shopkart incident"}
           </button>
           <button type="button" onClick={toggleKill} className="rounded-full border border-line px-4 py-2 text-sm">
@@ -104,7 +105,7 @@ export default function SuperAdminConsole() {
         />
       </label>
       {error && <p className="mt-4 text-sm text-heat">{error}</p>}
-      {message && <p className="mt-4 text-sm text-lime">{message}</p>}
+      {message && <p className="mt-4 text-sm text-mint">{message}</p>}
 
       {dossier && (
         <>
@@ -132,7 +133,7 @@ export default function SuperAdminConsole() {
                 key={name}
                 type="button"
                 onClick={() => setTab(name)}
-                className={`rounded-full px-4 py-1.5 text-sm ${tab === name ? "bg-lime text-ink" : "border border-line text-mute"}`}
+                className={`rounded-full px-4 py-1.5 text-sm ${tab === name ? "bg-mint text-ink" : "border border-line text-mute"}`}
               >
                 {name}
               </button>
@@ -165,7 +166,7 @@ function Incidents({ dossier, incident, onSelect, onApprove }) {
             key={item.id}
             type="button"
             onClick={() => onSelect(item.id)}
-            className={`block w-full rounded-lg border px-3 py-3 text-left ${incident?.id === item.id ? "border-lime" : "border-line"}`}
+            className={`block w-full rounded-lg border px-3 py-3 text-left ${incident?.id === item.id ? "border-mint" : "border-line"}`}
           >
             <div className="font-mono text-xs">{item.id}</div>
             <div className="mt-1 text-sm">{item.status}</div>
@@ -189,7 +190,7 @@ function IncidentDetail({ incident, onApprove }) {
 
   return (
     <div className="space-y-4">
-      <div className="rounded-lg border border-line bg-panel p-4">
+      <div className="card p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h2 className="font-mono text-sm">{incident.id}</h2>
@@ -198,7 +199,7 @@ function IncidentDetail({ incident, onApprove }) {
             </p>
           </div>
           {incident.status === "awaiting_approval" && (
-            <button type="button" onClick={() => onApprove(incident.id)} className="rounded-full bg-lime px-4 py-2 text-sm font-semibold text-ink">
+            <button type="button" onClick={() => onApprove(incident.id)} className="rounded-full bg-mint px-4 py-2 text-sm font-semibold text-ink">
               Approve 15-minute deploy
             </button>
           )}
@@ -244,7 +245,7 @@ function IncidentDetail({ incident, onApprove }) {
       </Panel>
 
       <Panel title="Detective">
-        <p className="font-mono text-xs text-lime">{detective.culprit_path || "No culprit yet."}</p>
+        <p className="font-mono text-xs text-mint">{detective.culprit_path || "No culprit yet."}</p>
         <ul className="mt-3 space-y-2">
           {(detective.culprits || []).map((hit) => (
             <li key={`${hit.path}-${hit.symbol}`} className="flex justify-between gap-4 font-mono text-xs">
@@ -363,7 +364,7 @@ function Security({ dossier }) {
         <p className="text-sm">{security.tenant_filter}</p>
         <p className="mt-3 text-sm">{security.sandbox}</p>
         <p className="mt-3 text-sm">{security.aws}</p>
-        <p className="mt-3 font-mono text-xs text-lime">STS session {security.session_seconds}s</p>
+        <p className="mt-3 font-mono text-xs text-mint">STS session {security.session_seconds}s</p>
       </Panel>
       <Panel title="Blocked Ansible modules">
         <ul className="space-y-1 font-mono text-xs">
@@ -375,7 +376,7 @@ function Security({ dossier }) {
       <Panel title="Registered targets">
         {Object.entries(security.registered_targets).map(([tenant, targets]) => (
           <div key={tenant} className="mb-3">
-            <div className="font-mono text-xs text-lime">{tenant}</div>
+            <div className="font-mono text-xs text-mint">{tenant}</div>
             {targets.map((target) => (
               <div key={target} className="text-sm">
                 {target}
@@ -425,7 +426,7 @@ function Audit({ rows }) {
       <ul className="space-y-2">
         {rows.map((row, index) => (
           <li key={`${row.at}-${index}`} className="font-mono text-xs">
-            <span className="text-lime">{row.action}</span> {row.detail}
+            <span className="text-mint">{row.action}</span> {row.detail}
             <span className="ml-3 text-mute">{row.at}</span>
           </li>
         ))}
@@ -436,7 +437,7 @@ function Audit({ rows }) {
 
 function Panel({ title, children }) {
   return (
-    <section className="rounded-lg border border-line bg-panel p-4">
+    <section className="card p-4">
       <h2 className="font-mono text-xs tracking-[0.12em] text-mute">{title}</h2>
       <div className="mt-3">{children}</div>
     </section>
@@ -463,7 +464,7 @@ function Pre({ text }) {
 
 function Stat({ label, value }) {
   return (
-    <div className="rounded-lg border border-line bg-panel p-4">
+    <div className="card p-4">
       <div className="font-mono text-xs text-mute">{label}</div>
       <div className="mt-2 text-2xl">{value}</div>
     </div>
@@ -472,9 +473,9 @@ function Stat({ label, value }) {
 
 function Flag({ label, on, detail }) {
   return (
-    <div className="rounded-lg border border-line bg-panel p-4">
+    <div className="card p-4">
       <div className="font-mono text-xs text-mute">{label}</div>
-      <div className={`mt-2 text-sm ${on ? "text-lime" : "text-paper"}`}>{on ? "ready" : "not set"}</div>
+      <div className={`mt-2 text-sm ${on ? "text-mint" : "text-paper"}`}>{on ? "ready" : "not set"}</div>
       <div className="mt-1 text-xs text-mute">{detail}</div>
     </div>
   );

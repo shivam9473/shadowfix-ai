@@ -68,8 +68,14 @@ class TenantMemory:
         if not os.getenv("MEM0_API_KEY"):
             return None
         try:
-            from mem0 import Memory
+            from mem0 import MemoryClient
+            client = MemoryClient(api_key=os.getenv("MEM0_API_KEY"))
+            client.add(text, user_id=tenant, metadata={"kind": kind, **metadata})
+            return True
         except Exception:
-            return None
-        Memory().add(text, user_id=tenant, metadata={"kind": kind, **metadata})
-        return True
+            try:
+                from mem0 import Memory
+                Memory().add(text, user_id=tenant, metadata={"kind": kind, **metadata})
+                return True
+            except Exception:
+                return None
