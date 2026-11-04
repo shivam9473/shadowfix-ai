@@ -19,7 +19,7 @@ class IncidentStore:
         self._items: dict[str, dict] = {}
         self._lock = threading.Lock()
 
-    def create(self, tenant_id: str, target: str) -> dict:
+    def create(self, tenant_id: str, target: str, **kwargs) -> dict:
         tenant = require_tenant(tenant_id)
         assert_target_allowed(tenant, target)
         incident = {
@@ -31,6 +31,7 @@ class IncidentStore:
             "report": {},
             "created_at": datetime.now(timezone.utc).isoformat(),
             "error": "",
+            **kwargs,
         }
         with self._lock:
             self._items[incident["id"]] = incident
@@ -84,6 +85,11 @@ def run_incident(store: IncidentStore, kb: AstKnowledgeBase, memory: TenantMemor
         {
             "tenant_id": incident["tenant_id"],
             "target": incident["target"],
+            "project_id": incident.get("project_id", ""),
+            "project_name": incident.get("project_name", ""),
+            "custom_stack": incident.get("custom_stack", ""),
+            "mode": incident.get("mode", ""),
+            "test_payload": incident.get("test_payload", ""),
             "attempts": 0,
             "original": "",
         }

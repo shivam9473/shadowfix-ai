@@ -1,6 +1,5 @@
-import os
 from functools import lru_cache
-
+import os
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,6 +34,7 @@ class Settings(BaseSettings):
     temporal_namespace: str = "default"
     temporal_task_queue: str = "shadowfix"
     toxiproxy_api: str = ""
+    locust_enabled: bool = False
     shopkart_url: str = ""
     mem0_api_key: str = ""
     eval_threshold: int = Field(default=85, ge=85, le=100)
@@ -57,6 +57,7 @@ def get_settings() -> Settings:
         "SHADOWFIX_DEPLOY_BUCKET": settings.shadowfix_deploy_bucket,
         "TEMPORAL_ADDRESS": settings.temporal_address,
         "TOXIPROXY_API": settings.toxiproxy_api,
+        "LOCUST_ENABLED": "true" if settings.locust_enabled else "",
         "SHOPKART_URL": settings.shopkart_url,
     }
     for key, val in mapping.items():

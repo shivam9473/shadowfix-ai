@@ -85,14 +85,32 @@ def scan_secrets(text: str) -> list[str]:
     return sorted(set(_SECRET.findall(text or "")))
 
 
-# Targets the demo is allowed to exercise. Public callers cannot add hosts.
-REGISTERED_TARGETS: dict[str, frozenset[str]] = {
-    "shopkart": frozenset({"shopkart://local", "http://127.0.0.1:8010"}),
+# Targets the demo is allowed to exercise. Public callers cannot add arbitrary hosts.
+REGISTERED_TARGETS: dict[str, set[str]] = {
+    "shopkart": {"shopkart://local", "http://127.0.0.1:8010"},
 }
+
+
+def register_project_target(tenant_id: str, target: str) -> None:
+    if not target:
+        return
+    if tenant_id not in REGISTERED_TARGETS:
+        REGISTERED_TARGETS[tenant_id] = set()
+    REGISTERED_TARGETS[tenant_id].add(target)
 
 
 def assert_target_allowed(tenant_id: str, target: str) -> None:
     require_tenant(tenant_id)
-    allowed = REGISTERED_TARGETS.get(tenant_id, frozenset())
-    if target not in allowed:
-        raise PermissionError(f"{target} is not registered for tenant {tenant_id}")
+    allowed = REGISTERED_TARGETS.get(tenant_id, set())
+    if target in allowed:
+        return
+    try:
+        from saas_db import saas_store
+
+        for p in saas_store.list_projects_for_tenant(tenant_id):
+            if p.get("target_url") == target or p.get("repo_url") == target:
+                register_project_target(tenant_id, target)
+                return
+    except Exception:
+        pass
+    raise PermissionError(f"{target} is not registered for tenant {tenant_id}")

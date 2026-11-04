@@ -1,0 +1,48 @@
+version: '3.8'
+
+services:
+  shadowfix-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5183:8000"
+    env_file:
+      - .env
+    depends_on:
+      - qdrant
+    networks:
+      - shadowfix-net
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - shadowfix-net
+    restart: unless-stopped
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=admin
+      - N8N_BASIC_AUTH_PASSWORD=secure_pass
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - shadowfix-net
+    restart: unless-stopped
+
+volumes:
+  qdrant_data:
+  n8n_data:
+
+networks:
+  shadowfix-net:
+    driver: bridge
