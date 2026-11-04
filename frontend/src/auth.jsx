@@ -1,47 +1,17 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 
-// Front-end only accounts. Accounts live in localStorage; passwords stored as salted SHA-256 hashes.
-// Swap signUp/signIn/signOut for real API calls when the backend gains auth.
-
-const USERS_KEY = "shadowfix.users";
-const SESSION_KEY = "shadowfix.session";
+const TOKEN_KEY = "shadowfix.token";
+const USER_KEY = "shadowfix.user";
 export const ADMIN_KEY_STORAGE = "shadowfix.adminKey";
 
-function readUsers() {
+function getStoredToken() {
+  return localStorage.getItem(TOKEN_KEY) || "";
+}
+
+function getStoredUser() {
   try {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-
-function writeUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
-
-async function hash(password, salt) {
-  if (!globalThis.crypto?.subtle) {
-    throw new Error("This browser blocks secure hashing here. Open the app on localhost or HTTPS.");
-  }
-  const bytes = new TextEncoder().encode(`${salt}:${password}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function randomSalt() {
-  return Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) =>
-    b.toString(16).padStart(2, "0")
-  ).join("");
-}
-
-function loadSession() {
-  try {
-    const email = localStorage.getItem(SESSION_KEY);
-    if (!email) return null;
-    const found = readUsers().find((u) => u.email === email);
-    return found
-      ? { name: found.name, email: found.email, joinedAt: found.joinedAt || "" }
-      : null;
+    const raw = localStorage.getItem(USER_KEY);
+    return raw ? JSON.parse(raw) : null;
   } catch {
     return null;
   }
@@ -50,47 +20,87 @@ function loadSession() {
 const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(loadSession);
+  const [token, setToken] = useState(getStoredToken);
+  const [user, setUser] = useState(getStoredUser);
   const [adminKey, setAdminKeyState] = useState(
     () => sessionStorage.getItem(ADMIN_KEY_STORAGE) || ""
   );
 
-  const signUp = useCallback(async ({ name, email, password }) => {
-    const normalized = email.trim().toLowerCase();
-    const users = readUsers();
-    if (users.some((u) => u.email === normalized)) {
-      throw new Error("An account with this email already exists. Log in instead.");
+  // Sync token to user session validation
+  useEffect(() => {
+    if (!token) return;
+    fetch("/api/auth/me", {
+      headers: { "X-Session-Token": token },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.user) {
+          setUser(data.user);
+          localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+          if (data.user.role === "super_admin") {
+            setAdminKeyState("Shadowfix@4321");
+            sessionStorage.setItem(ADMIN_KEY_STORAGE, "Shadowfix@4321");
+          }
+        }
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const signUp = useCallback(async ({ name, email, password, organizationName }) => {
+    const res = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: name.trim(),
+        email: email.trim().toLowerCase(),
+        password,
+        organization_name: organizationName || undefined,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Registration failed.");
     }
-    const salt = randomSalt();
-    const joinedAt = new Date().toISOString();
-    const record = {
-      name: name.trim(),
-      email: normalized,
-      salt,
-      hash: await hash(password, salt),
-      joinedAt,
-    };
-    writeUsers([...users, record]);
-    localStorage.setItem(SESSION_KEY, normalized);
-    setUser({ name: record.name, email: record.email, joinedAt });
+    const authUser = data.user;
+    setToken(authUser.token);
+    setUser(authUser);
+    localStorage.setItem(TOKEN_KEY, authUser.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(authUser));
+    return authUser;
   }, []);
 
   const signIn = useCallback(async ({ email, password }) => {
-    const normalized = email.trim().toLowerCase();
-    const record = readUsers().find((u) => u.email === normalized);
-    const attempt = record ? await hash(password, record.salt) : "";
-    if (!record || attempt !== record.hash) {
-      throw new Error("Email or password is incorrect.");
+    const res = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.detail || "Authentication failed.");
     }
-    localStorage.setItem(SESSION_KEY, normalized);
-    setUser({ name: record.name, email: record.email, joinedAt: record.joinedAt || "" });
+    const authUser = data.user;
+    setToken(authUser.token);
+    setUser(authUser);
+    localStorage.setItem(TOKEN_KEY, authUser.token);
+    localStorage.setItem(USER_KEY, JSON.stringify(authUser));
+    if (authUser.role === "super_admin") {
+      setAdminKeyState("Shadowfix@4321");
+      sessionStorage.setItem(ADMIN_KEY_STORAGE, "Shadowfix@4321");
+    }
+    return authUser;
   }, []);
 
   const signOut = useCallback(() => {
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(ADMIN_KEY_STORAGE);
-    setAdminKeyState("");
+    setToken("");
     setUser(null);
+    setAdminKeyState("");
   }, []);
 
   const saveAdminKey = useCallback((key) => {
@@ -103,17 +113,38 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    if (!token) return;
+    try {
+      const res = await fetch("/api/auth/me", {
+        headers: { "X-Session-Token": token },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+      }
+    } catch {}
+  }, [token]);
+
+  const isSuperAdmin = user?.role === "super_admin" || !!adminKey;
+  const isUserAdmin = user?.role === "user_admin";
+
   const value = useMemo(
     () => ({
       user,
+      token,
       signUp,
       signIn,
       signOut,
+      refreshUser,
       adminKey,
       saveAdminKey,
-      hasAdminKey: !!adminKey,
+      hasAdminKey: !!adminKey || isSuperAdmin,
+      isSuperAdmin,
+      isUserAdmin,
     }),
-    [user, signUp, signIn, signOut, adminKey, saveAdminKey]
+    [user, token, signUp, signIn, signOut, refreshUser, adminKey, saveAdminKey, isSuperAdmin, isUserAdmin]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

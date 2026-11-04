@@ -1,4 +1,4 @@
-"""LangGraph wiring for the five agents. Approval is a human gate after this graph."""
+"""LangGraph wiring for the five agents. Supports both Shopkart demo and custom user projects."""
 
 from __future__ import annotations
 
@@ -19,6 +19,11 @@ from paths import DEMO_ROOT
 class FixState(TypedDict, total=False):
     tenant_id: str
     target: str
+    project_id: str
+    project_name: str
+    custom_stack: str
+    mode: str
+    test_payload: str
     attempts: int
     original: str
     breaker: dict
@@ -32,7 +37,14 @@ def build_graph(kb: AstKnowledgeBase, memory: TenantMemory):
     checkout = (DEMO_ROOT / "api" / "checkout.py").read_text(encoding="utf-8")
 
     def breaker_node(state: FixState) -> dict:
-        report = run_breaker(state["tenant_id"], state["target"])
+        report = run_breaker(
+            tenant_id=state["tenant_id"],
+            target=state["target"],
+            project_id=state.get("project_id", ""),
+            custom_stack=state.get("custom_stack", ""),
+            mode=state.get("mode", ""),
+            test_payload=state.get("test_payload", ""),
+        )
         memory.add_episode(
             state["tenant_id"],
             report["stack"][-500:],
@@ -44,19 +56,38 @@ def build_graph(kb: AstKnowledgeBase, memory: TenantMemory):
         return {"sre": run_sre(state["tenant_id"], state["breaker"]["stack"])}
 
     def detective_node(state: FixState) -> dict:
-        return {"detective": run_detective(kb, state["tenant_id"], state["breaker"]["stack"])}
+        return {
+            "detective": run_detective(
+                kb=kb,
+                tenant_id=state["tenant_id"],
+                stack=state["breaker"]["stack"],
+                project_id=state.get("project_id", ""),
+            )
+        }
 
     def coder_node(state: FixState) -> dict:
         culprit = state["detective"]["culprit_path"]
-        draft = run_coder(state["tenant_id"], culprit, state.get("original") or checkout, state["breaker"]["stack"])
+        orig = state.get("original") or (checkout if not state.get("project_id") else "")
+        draft = run_coder(
+            tenant_id=state["tenant_id"],
+            culprit_path=culprit,
+            original=orig,
+            stack=state["breaker"]["stack"],
+            project_id=state.get("project_id", ""),
+        )
         return {"coder": draft, "attempts": state.get("attempts", 0) + 1}
 
     def reviewer_node(state: FixState) -> dict:
         review = run_reviewer(state["coder"])
         if review["passed"]:
+            rule = (
+                "100% coupons are a multiplier (1 - discount), never a divisor."
+                if not state.get("project_id")
+                else f"Automated fix verified for {state.get('project_name', 'project')}"
+            )
             memory.add_procedure(
                 state["tenant_id"],
-                "100% coupons are a multiplier (1 - discount), never a divisor.",
+                rule,
                 {"eval_score": review["eval_score"]},
             )
         return {"review": review}
