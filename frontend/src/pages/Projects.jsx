@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { deleteProject, fetchProjects, importProject, runProjectIncident } from "../api";
+import { deleteProject, fetchProjectBugs, fetchProjects, fixProjectBug, importProject, runProjectIncident } from "../api";
 import { useAuth } from "../auth";
 
 export default function Projects() {
@@ -20,6 +20,12 @@ export default function Projects() {
   const [tracebackInput, setTracebackInput] = useState("");
   const [testPayload, setTestPayload] = useState("");
   const [runningFix, setRunningFix] = useState(false);
+
+  // Bug Audit Drawer/Modal State
+  const [auditModalProj, setAuditModalProj] = useState(null);
+  const [auditData, setAuditData] = useState(null);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [fixingBugId, setFixingBugId] = useState(null);
 
   const [form, setForm] = useState({
     name: "",
@@ -81,6 +87,42 @@ export default function Projects() {
       setProjects((prev) => prev.filter((p) => p.id !== projectId));
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+  async function handleOpenAudit(project) {
+    setAuditModalProj(project);
+    setLoadingAudit(true);
+    setAuditData(null);
+    setError("");
+    try {
+      const data = await fetchProjectBugs(project.id);
+      setAuditData(data);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoadingAudit(false);
+    }
+  }
+
+  async function handleFixSingleBug(bug) {
+    if (!auditModalProj) return;
+    setFixingBugId(bug.id);
+    setError("");
+    try {
+      const incident = await fixProjectBug(auditModalProj.id, {
+        bug_id: bug.id,
+        file_path: bug.file_path,
+        line_number: bug.line_number,
+        stack_trace: bug.stack_trace,
+        title: bug.title,
+      });
+      setAuditModalProj(null);
+      navigate(`/incident/${incident.id}`);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setFixingBugId(null);
     }
   }
 
@@ -240,7 +282,14 @@ export default function Projects() {
                   onClick={() => openFixModal(proj)}
                   className="rounded-full bg-mint px-4 py-2 text-xs font-bold text-ink shadow transition hover:opacity-90 flex items-center gap-1.5"
                 >
-                  <span>⚡</span> Trigger Bug Fix
+                  <span>⚡</span> Fix Desk
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleOpenAudit(proj)}
+                  className="rounded-full border border-brand/40 bg-brand/10 px-3.5 py-2 text-xs font-bold text-brand transition hover:bg-brand/20 flex items-center gap-1.5"
+                >
+                  <span>🛡️</span> Audit Bugs
                 </button>
                 <button
                   type="button"
@@ -479,6 +528,145 @@ export default function Projects() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ── Deep Bug Audit Modal ── */}
+      {auditModalProj && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <div className="card w-full max-w-4xl max-h-[90vh] flex flex-col p-6 shadow-2xl border border-line animate-in fade-in">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-line pb-4 flex-none">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="rounded-full bg-brand/20 px-3 py-0.5 font-mono text-xs font-bold text-brand uppercase">
+                    Security & Defect Audit
+                  </span>
+                  <span className="font-mono text-xs text-mute">Project: {auditModalProj.name}</span>
+                </div>
+                <h2 className="mt-2 text-2xl font-black tracking-tight">Codebase Vulnerability Hunter</h2>
+                <p className="mt-1 text-xs text-mute">
+                  Static AST analysis, cryptographic guardrails, injection heuristics, and dynamic test runners.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuditModalProj(null)}
+                className="rounded-full p-2 text-mute hover:bg-panel-2 hover:text-paper"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Metrics Pills */}
+            {auditData && (
+              <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-2.5 font-mono text-xs flex-none">
+                <div className="rounded-xl border border-line bg-ink/70 p-3">
+                  <span className="text-mute block text-[10px] uppercase">Total Defects</span>
+                  <span className="text-lg font-bold text-paper">{auditData.total_bugs}</span>
+                </div>
+                <div className="rounded-xl border border-heat/40 bg-heat/10 p-3">
+                  <span className="text-heat block text-[10px] uppercase font-bold">Critical</span>
+                  <span className="text-lg font-bold text-heat">{auditData.critical}</span>
+                </div>
+                <div className="rounded-xl border border-orange-500/40 bg-orange-500/10 p-3">
+                  <span className="text-orange-400 block text-[10px] uppercase font-bold">High</span>
+                  <span className="text-lg font-bold text-orange-400">{auditData.high}</span>
+                </div>
+                <div className="rounded-xl border border-yellow-500/40 bg-yellow-500/10 p-3">
+                  <span className="text-yellow-400 block text-[10px] uppercase font-bold">Medium</span>
+                  <span className="text-lg font-bold text-yellow-400">{auditData.medium}</span>
+                </div>
+                <div className="rounded-xl border border-blue-500/40 bg-blue-500/10 p-3">
+                  <span className="text-blue-400 block text-[10px] uppercase font-bold">Low / Info</span>
+                  <span className="text-lg font-bold text-blue-400">{auditData.low}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Content Body (Scrollable) */}
+            <div className="mt-4 flex-1 overflow-y-auto pr-1 space-y-4">
+              {loadingAudit ? (
+                <div className="py-16 text-center text-sm text-mute">
+                  <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-brand border-t-transparent" />
+                  Running deep multi-engine AST scanner and guardrails across {auditModalProj.name}...
+                </div>
+              ) : !auditData || auditData.bugs.length === 0 ? (
+                <div className="py-16 text-center">
+                  <span className="text-3xl">🛡️</span>
+                  <h3 className="mt-2 text-base font-bold text-mint">No Vulnerabilities or Crashes Found</h3>
+                  <p className="mt-1 text-xs text-mute">
+                    Codebase AST syntax, division safeguards, and security guardrails passed all checks.
+                  </p>
+                </div>
+              ) : (
+                auditData.bugs.map((bug) => (
+                  <div
+                    key={bug.id}
+                    className="rounded-xl border border-line bg-panel-2/50 p-4 transition hover:border-line-hover"
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 font-mono text-[10px] font-black uppercase ${
+                            bug.severity === "CRITICAL"
+                              ? "bg-heat text-white"
+                              : bug.severity === "HIGH"
+                              ? "bg-orange-500 text-white"
+                              : bug.severity === "MEDIUM"
+                              ? "bg-yellow-500 text-ink font-bold"
+                              : "bg-blue-500 text-white"
+                          }`}
+                        >
+                          {bug.severity}
+                        </span>
+                        <span className="font-mono text-xs text-mute">{bug.category}</span>
+                        {bug.cwe && (
+                          <span className="rounded bg-ink px-1.5 py-0.5 font-mono text-[10px] text-mute border border-line">
+                            {bug.cwe}
+                          </span>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleFixSingleBug(bug)}
+                        disabled={fixingBugId === bug.id}
+                        className="rounded-full bg-mint px-4 py-1.5 text-xs font-bold text-ink shadow transition hover:opacity-90 disabled:opacity-50 flex items-center gap-1.5"
+                      >
+                        <span>⚡</span>
+                        {fixingBugId === bug.id ? "Launching Repair..." : "Auto-Fix This Bug"}
+                      </button>
+                    </div>
+
+                    <h4 className="mt-2 text-sm font-bold text-paper">{bug.title}</h4>
+                    <p className="mt-0.5 font-mono text-xs text-mint">
+                      📍 {bug.file_path}:{bug.line_number} {bug.symbol ? `in ${bug.symbol}()` : ""}
+                    </p>
+
+                    <p className="mt-2 text-xs text-mute leading-relaxed">{bug.description}</p>
+
+                    {bug.code_snippet && (
+                      <div className="mt-2.5 rounded-lg bg-ink p-2.5 font-mono text-xs text-paper border border-line overflow-x-auto">
+                        <pre className="text-[11px] leading-tight">{bug.code_snippet}</pre>
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="mt-4 flex justify-between items-center pt-3 border-t border-line flex-none">
+              <span className="font-mono text-xs text-mute">ShadowFix Deep Guardrail Engine</span>
+              <button
+                type="button"
+                onClick={() => setAuditModalProj(null)}
+                className="rounded-full border border-line px-5 py-2 text-xs font-semibold hover:bg-panel-2"
+              >
+                Close Audit
+              </button>
+            </div>
           </div>
         </div>
       )}

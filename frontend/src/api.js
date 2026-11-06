@@ -83,6 +83,30 @@ export async function runProjectIncident(projectId, runConfig = {}) {
   return body;
 }
 
+export async function fetchProjectBugs(projectId) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch(`/api/projects/${projectId}/bugs`, {
+    headers: { "X-Session-Token": token },
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function fixProjectBug(projectId, bugData) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch(`/api/projects/${projectId}/fix-bug`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(bugData),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Failed to trigger bug fix.");
+  return body;
+}
+
 // ── Billing API ──
 export async function fetchPlans() {
   const res = await fetch("/api/billing/plans");

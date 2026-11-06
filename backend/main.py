@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
 
 from admin_dossier import build_dossier
+from agents.bug_hunter import hunt_all_bugs_in_project, run_dynamic_test_runner
 from config import get_settings
 from knowledge.mem0_rules import TenantMemory
 from knowledge.qdrant_prod import AstKnowledgeBase
@@ -134,6 +135,14 @@ class ProjectImportRequest(BaseModel):
 class UpgradePlanRequest(BaseModel):
     plan: str
     payment_method: str = "card_demo"
+
+
+class FixBugRequest(BaseModel):
+    bug_id: str = ""
+    file_path: str = ""
+    line_number: int = 1
+    stack_trace: str = ""
+    title: str = ""
 
 
 class ProjectRunRequest(BaseModel):
@@ -296,6 +305,76 @@ async def run_project_incident(project_id: str, request: Request, body: ProjectR
         custom_stack=req_body.traceback,
         mode=req_body.mode,
         test_payload=req_body.test_payload,
+    )
+    asyncio.create_task(_execute(incident["id"]))
+    return incident
+
+
+@app.get("/api/projects/{project_id}/bugs")
+def audit_project_bugs(project_id: str, request: Request) -> dict:
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+    projects = saas_store.list_projects_for_tenant(tenant_id)
+    target_proj = next((p for p in projects if p["id"] == project_id), None)
+    if not target_proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    repos_dir = DATA_DIR / "imported_repos"
+    project_dir = repos_dir / project_id
+
+    detected_bugs = hunt_all_bugs_in_project(project_dir)
+    test_runner = run_dynamic_test_runner(project_dir)
+
+    critical = sum(1 for b in detected_bugs if b.severity == "CRITICAL")
+    high = sum(1 for b in detected_bugs if b.severity == "HIGH")
+    medium = sum(1 for b in detected_bugs if b.severity == "MEDIUM")
+    low = sum(1 for b in detected_bugs if b.severity == "LOW")
+
+    return {
+        "project_id": project_id,
+        "project_name": target_proj["name"],
+        "total_bugs": len(detected_bugs),
+        "critical": critical,
+        "high": high,
+        "medium": medium,
+        "low": low,
+        "bugs": [b.to_dict() for b in detected_bugs],
+        "test_runner": test_runner,
+    }
+
+
+@app.post("/api/projects/{project_id}/fix-bug")
+async def fix_project_bug(project_id: str, body: FixBugRequest, request: Request) -> dict:
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+
+    if app.state.admin.killed or saas_store._data["settings"].get("global_kill_switch"):
+        raise HTTPException(status_code=423, detail="System kill switch is on.")
+
+    projects = saas_store.list_projects_for_tenant(tenant_id)
+    target_proj = next((p for p in projects if p["id"] == project_id), None)
+    if not target_proj:
+        raise HTTPException(status_code=404, detail="Project not found.")
+
+    try:
+        app.state.admin.consume_quota(tenant_id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+    target = f"{target_proj.get('repo_url', 'project://')}/{body.file_path}#L{body.line_number}"
+    register_project_target(tenant_id, target)
+
+    incident = app.state.store.create(
+        tenant_id=tenant_id,
+        target=target,
+        project_id=project_id,
+        project_name=target_proj["name"],
+        repo_url=target_proj.get("repo_url", ""),
+        branch=target_proj.get("branch", "main"),
+        custom_stack=body.stack_trace,
+        mode="bug_fix",
+        bug_id=body.bug_id,
+        bug_title=body.title,
     )
     asyncio.create_task(_execute(incident["id"]))
     return incident

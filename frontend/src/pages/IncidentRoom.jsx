@@ -96,6 +96,75 @@ export default function IncidentRoom() {
         </div>
       </div>
 
+      {/* ── 5-Factor Evaluation Rubric Card ── */}
+      {review?.eval_rubric && (
+        <div className="mt-8 rounded-2xl border border-line bg-panel-2/60 p-6 shadow-md">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-4">
+            <div>
+              <span className="font-mono text-xs font-bold uppercase text-mint">Quality & Safety Gate</span>
+              <h3 className="text-lg font-bold text-paper">Rigorous 5-Factor Evaluation Rubric</h3>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-xs text-mute">Passing Threshold: 85/100</span>
+              <span className={`rounded-full px-3 py-1 font-mono text-xs font-black ${
+                review.eval_score >= 85 ? "bg-mint/20 text-mint border border-mint/40" : "bg-heat/20 text-heat"
+              }`}>
+                {review.eval_score} / 100 ({review.passed ? "PASSED" : "FAILED"})
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 sm:grid-cols-5 gap-3 font-mono text-xs">
+            <div className="rounded-xl border border-line bg-ink/70 p-3">
+              <span className="text-mute block text-[10px] uppercase">Security Guardrails</span>
+              <span className="text-base font-bold text-mint">{review.eval_rubric.security} / 25</span>
+            </div>
+            <div className="rounded-xl border border-line bg-ink/70 p-3">
+              <span className="text-mute block text-[10px] uppercase">Defect Elimination</span>
+              <span className="text-base font-bold text-mint">{review.eval_rubric.defect_elimination} / 30</span>
+            </div>
+            <div className="rounded-xl border border-line bg-ink/70 p-3">
+              <span className="text-mute block text-[10px] uppercase">Syntax & AST</span>
+              <span className="text-base font-bold text-mint">{review.eval_rubric.syntax_integrity} / 20</span>
+            </div>
+            <div className="rounded-xl border border-line bg-ink/70 p-3">
+              <span className="text-mute block text-[10px] uppercase">Regression Safety</span>
+              <span className="text-base font-bold text-mint">{review.eval_rubric.regression_safety} / 15</span>
+            </div>
+            <div className="rounded-xl border border-line bg-ink/70 p-3">
+              <span className="text-mute block text-[10px] uppercase">Code Quality</span>
+              <span className="text-base font-bold text-mint">{review.eval_rubric.code_quality} / 10</span>
+            </div>
+          </div>
+
+          {review.eval_rubric.breakdown && review.eval_rubric.breakdown.length > 0 && (
+            <div className="mt-4 space-y-1 rounded-xl bg-ink/50 p-3 text-xs text-mute font-mono">
+              {review.eval_rubric.breakdown.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-2">
+                  <span className="text-mint">✓</span>
+                  <span>{item}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Breaker Crash & Traceback ── */}
+      {breaker?.stack && (
+        <div className="mt-8 rounded-2xl border border-heat/30 bg-heat/5 p-5">
+          <div className="flex items-center justify-between mb-2">
+            <span className="font-mono text-xs font-bold uppercase text-heat flex items-center gap-1.5">
+              <span>⚠️</span> Breaker Captured Crash Traceback
+            </span>
+            <span className="font-mono text-[11px] text-mute">{breaker.error}</span>
+          </div>
+          <div className="rounded-xl bg-ink p-3 font-mono text-xs text-heat border border-heat/20 overflow-x-auto">
+            <pre className="text-[11px] leading-relaxed whitespace-pre-wrap">{breaker.stack}</pre>
+          </div>
+        </div>
+      )}
+
       {/* ── Monaco Code Diff ── */}
       <div className="mt-8">
         <div className="flex items-center justify-between mb-2">

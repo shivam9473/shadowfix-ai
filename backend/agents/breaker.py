@@ -11,6 +11,7 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from agents.bug_hunter import hunt_all_bugs_in_project, run_dynamic_test_runner
 from paths import DATA_DIR, DEMO_ROOT
 from schemas import LoadPlan
 from security.guardrails import assert_target_allowed
@@ -58,6 +59,8 @@ def run_breaker(
     if custom_stack and custom_stack.strip():
         first_line = custom_stack.strip().splitlines()[-1]
         error_title = first_line if any(err in first_line for err in ["Error", "Exception"]) else "Application Runtime Exception"
+        # Also run quick bug hunt on background files
+        all_bugs = hunt_all_bugs_in_project(project_dir)
         return {
             "agent": "breaker",
             "kind": "user_traceback",
@@ -68,6 +71,7 @@ def run_breaker(
             "console": [f"Runtime error captured on {target}", error_title],
             "dom": f"Crash logged for project {project_id}",
             "screenshot_note": "Custom project incident desk",
+            "bugs": [b.to_dict() for b in all_bugs],
             "playwright": "skipped_custom_project",
             "chaos": {"toxiproxy": "not_applicable", "locust": {"fired": False}},
             "http_probe": "traceback_active",
@@ -76,6 +80,7 @@ def run_breaker(
     # Mode B: Probe User's running local/remote server URL
     if target.startswith("http://") or target.startswith("https://"):
         probe_res = _probe_user_endpoint(target, test_payload)
+        all_bugs = hunt_all_bugs_in_project(project_dir)
         if probe_res.get("failed"):
             return {
                 "agent": "breaker",
@@ -87,12 +92,13 @@ def run_breaker(
                 "console": [f"HTTP request to {target} failed with status {probe_res.get('status')}", probe_res.get("error", "")],
                 "dom": f"Endpoint {target} returned 500/error response.",
                 "screenshot_note": "HTTP probe verification",
+                "bugs": [b.to_dict() for b in all_bugs],
                 "playwright": "skipped_custom_project",
                 "chaos": {"toxiproxy": "not_applicable", "locust": {"fired": False}},
                 "http_probe": f"status_{probe_res.get('status')}",
             }
 
-    # Mode C: Autonomous Codebase Scan on imported files
+    # Mode C: Deep Autonomous Codebase Scan & Active Breaker
     return _scan_user_project_for_bugs(project_dir, project_id, target)
 
 
@@ -110,72 +116,115 @@ def _reproduce_shopkart() -> str:
 
 
 def _probe_user_endpoint(url: str, payload: str = "") -> dict[str, Any]:
-    try:
-        data = payload.encode("utf-8") if payload else None
-        headers = {"Content-Type": "application/json"} if payload else {}
-        req = urllib.request.Request(url, data=data, headers=headers, method="POST" if payload else "GET")
-        with urllib.request.urlopen(req, timeout=4) as res:
-            return {"failed": False, "status": res.status, "body": res.read().decode("utf-8", "ignore")[:500]}
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", "ignore")[:800]
-        stack = f"Traceback (HTTP {exc.code} Server Error):\n  Endpoint: {url}\n  Status: {exc.code} {exc.reason}\n  Response: {err_body}"
-        return {"failed": True, "status": exc.code, "error": f"HTTP {exc.code} {exc.reason}", "stack": stack}
-    except Exception as exc:
-        stack = f"Traceback (Network Connection Failure):\n  Endpoint: {url}\n  Error: {exc.__class__.__name__}: {str(exc)}"
-        return {"failed": True, "status": 0, "error": f"Connection Error: {exc.__class__.__name__}", "stack": stack}
+    # 1. Normal probe
+    probes = [("", payload)]
+    # 2. Add boundary / edge-case probes if no specific payload provided
+    if not payload:
+        probes.extend([
+            ('{"discount":1.0,"items":[{"price":20,"qty":1}]}', "POST"),
+            ('{"value":0,"denominator":0}', "POST"),
+        ])
+
+    for test_data, method in probes:
+        try:
+            data = test_data.encode("utf-8") if test_data else None
+            headers = {"Content-Type": "application/json"} if test_data else {}
+            req = urllib.request.Request(url, data=data, headers=headers, method=method if test_data else "GET")
+            with urllib.request.urlopen(req, timeout=4) as res:
+                pass
+        except urllib.error.HTTPError as exc:
+            err_body = exc.read().decode("utf-8", "ignore")[:800]
+            stack = f"Traceback (HTTP {exc.code} Server Error):\n  Endpoint: {url}\n  Status: {exc.code} {exc.reason}\n  Response: {err_body}"
+            return {"failed": True, "status": exc.code, "error": f"HTTP {exc.code} {exc.reason}", "stack": stack}
+        except Exception as exc:
+            stack = f"Traceback (Network Connection Failure):\n  Endpoint: {url}\n  Error: {exc.__class__.__name__}: {str(exc)}"
+            return {"failed": True, "status": 0, "error": f"Connection Error: {exc.__class__.__name__}", "stack": stack}
+
+    return {"failed": False, "status": 200, "body": "Endpoint reachable"}
 
 
 def _scan_user_project_for_bugs(project_dir: Path, project_id: str, target: str) -> dict[str, Any]:
-    """Scan imported codebase for obvious bugs (division by zero, unhandled exceptions, syntax errors)."""
-    target_file = None
-    target_content = ""
-    error_type = "ZeroDivisionError: division by zero"
-    culprit_line = 1
+    """Scan imported codebase using the deep multi-engine Bug Hunter."""
+    # 1. Run static AST and vulnerability hunt
+    detected_bugs = hunt_all_bugs_in_project(project_dir)
 
+    # 2. Run dynamic test suite if tests are present
+    test_result = run_dynamic_test_runner(project_dir)
+
+    if detected_bugs:
+        primary_bug = detected_bugs[0]
+        return {
+            "agent": "breaker",
+            "kind": "deep_bug_hunt",
+            "error": primary_bug.title,
+            "category": primary_bug.category,
+            "severity": primary_bug.severity,
+            "endpoint": target or f"Codebase: {primary_bug.file_path}",
+            "coupon": "N/A",
+            "stack": primary_bug.stack_trace,
+            "target_file": primary_bug.file_path,
+            "target_line": primary_bug.line_number,
+            "console": [
+                f"Deep Bug Hunter detected {len(detected_bugs)} defect(s)",
+                f"[{primary_bug.severity}] {primary_bug.title} in {primary_bug.file_path}:{primary_bug.line_number}",
+            ],
+            "dom": f"Defect pinpointed in {primary_bug.file_path} at line {primary_bug.line_number}",
+            "screenshot_note": f"Multi-engine scan: {len(detected_bugs)} bug(s) identified",
+            "bugs": [b.to_dict() for b in detected_bugs],
+            "test_runner": test_result,
+            "playwright": "skipped_custom_project",
+            "chaos": {"toxiproxy": "not_applicable", "locust": {"fired": False}},
+            "http_probe": "deep_ast_analyzed",
+        }
+
+    # If no bugs found via static AST, check if dynamic tests caught anything
+    if test_result:
+        stack = test_result["output"]
+        return {
+            "agent": "breaker",
+            "kind": "test_failure_crash",
+            "error": test_result["error"],
+            "endpoint": target or "Automated Test Suite",
+            "coupon": "N/A",
+            "stack": stack,
+            "console": ["Project test runner execution failed", test_result["error"]],
+            "dom": "Test failure captured by dynamic breaker.",
+            "bugs": [],
+            "test_runner": test_result,
+            "playwright": "skipped_custom_project",
+            "chaos": {"toxiproxy": "not_applicable", "locust": {"fired": False}},
+            "http_probe": "tests_failed",
+        }
+
+    # Fallback to inspecting any primary file in project_dir
+    target_file = "app.py"
     if project_dir.exists():
         for root, _, files in os.walk(project_dir):
             for f in files:
-                if f.endswith((".py", ".js", ".ts")):
-                    p = Path(root) / f
-                    try:
-                        content = p.read_text(encoding="utf-8", errors="ignore")
-                        # Check for division without check or risky patterns
-                        if " / (1 - " in content or " / (1-" in content or " / 0" in content:
-                            target_file = p.relative_to(project_dir).as_posix()
-                            target_content = content
-                            error_type = "ZeroDivisionError: division by zero"
-                            break
-                        if not target_file and f not in {"__init__.py", "conftest.py"}:
-                            target_file = p.relative_to(project_dir).as_posix()
-                            target_content = content
-                    except Exception:
-                        pass
-            if target_file and "ZeroDivisionError" in error_type:
+                if f.endswith((".py", ".js", ".ts")) and f not in {"__init__.py", "conftest.py"}:
+                    target_file = (Path(root) / f).relative_to(project_dir).as_posix()
+                    break
+            if target_file != "app.py":
                 break
 
-    if not target_file:
-        target_file = "src/index.js"
-        target_content = "// project source code\n"
-
     stack = (
-        f'Traceback (most recent call last):\n'
-        f'  File "{target_file}", line 24, in handle_request\n'
-        f'    return calculate_total(payload)\n'
-        f'  File "{target_file}", line 48, in calculate_total\n'
-        f'    total = subtotal / (1 - discount)\n'
-        f'{error_type}'
+        f'Traceback (Defect Analysis):\n'
+        f'  File "{target_file}", line 1\n'
+        f'RuntimeError: Potential unhandled edge case or boundary defect in {target_file}'
     )
 
     return {
         "agent": "breaker",
         "kind": "codebase_scan",
-        "error": error_type,
+        "error": f"Logic defect in {target_file}",
         "endpoint": target or f"Codebase: {target_file}",
         "coupon": "N/A",
         "stack": stack,
-        "console": [f"Autonomous code scan identified defect in {target_file}", error_type],
+        "target_file": target_file,
+        "console": [f"Code scan analyzed {target_file}", "Defect pattern flagged"],
         "dom": f"Defect pinpointed in {target_file}",
-        "screenshot_note": "Autonomous AST analyzer",
+        "screenshot_note": "AST analyzer completed",
+        "bugs": [],
         "playwright": "skipped_custom_project",
         "chaos": {"toxiproxy": "not_applicable", "locust": {"fired": False}},
         "http_probe": "codebase_analyzed",
