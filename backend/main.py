@@ -1,15 +1,20 @@
-"""FastAPI surface: demo runs, multi-tenant SaaS desk, admin approval, websockets."""
+"""FastAPI surface: demo runs, multi-tenant SaaS desk, admin approval, websockets.
+Hardened with tenant isolation, rate limiting, security headers, request tracing, and webhook idempotency.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
 import hmac
+import os
 import secrets
+import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from qdrant_client import QdrantClient
@@ -25,6 +30,12 @@ from project_importer import import_and_index_repository
 from saas_db import PLANS, saas_store
 from security.aws_jit import ApprovalLedger, mint_jit_credentials, public_view
 from security.guardrails import register_project_target
+from security.infra_hardening import (
+    RateLimitMiddleware,
+    RequestTracingMiddleware,
+    SecurityHeadersMiddleware,
+    validate_production_environment,
+)
 from super_admin import SuperAdmin
 
 
@@ -44,6 +55,9 @@ def build_knowledge() -> AstKnowledgeBase:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
+    # Validate production invariants before accepting traffic
+    validate_production_environment(settings.shadowfix_env, settings.admin_api_key)
+
     app.state.settings = settings
     app.state.kb = build_knowledge()
     app.state.memory = TenantMemory()
@@ -54,15 +68,21 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="ShadowFix AI SaaS", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="ShadowFix AI SaaS", version="0.3.0", lifespan=lifespan)
+
+# Middlewares
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(RequestTracingMiddleware)
+app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
+
+allowed_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5183,http://localhost:5183",
+).split(",")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5173",
-        "http://localhost:5173",
-        "http://127.0.0.1:5183",
-        "http://localhost:5183",
-    ],
+    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -152,7 +172,7 @@ class ProjectRunRequest(BaseModel):
     test_payload: str = ""
 
 
-# ── Health & Public ──
+# ── Health & Readiness Probes ──
 @app.get("/api/health")
 def health() -> dict:
     return {
@@ -162,6 +182,28 @@ def health() -> dict:
         "eval_threshold": app.state.settings.eval_threshold,
         "saas_active": True,
     }
+
+
+@app.get("/api/health/live")
+def health_live() -> dict:
+    return {"status": "alive", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+@app.get("/api/health/ready")
+def health_ready() -> dict:
+    ready = True
+    checks = {"qdrant": "ok", "db": "ok", "storage": "ok"}
+    try:
+        if not DATA_DIR.exists():
+            ready = False
+            checks["storage"] = "missing_data_dir"
+    except Exception as exc:
+        ready = False
+        checks["storage"] = str(exc)
+
+    if not ready:
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "checks": checks})
+    return {"status": "ready", "checks": checks}
 
 
 # ── Auth Endpoints ──
@@ -174,7 +216,6 @@ def register(body: RegisterRequest) -> dict:
             password=body.password,
             organization_name=body.organization_name,
         )
-        # Automatically authenticate upon registration
         auth_data = saas_store.authenticate_user(body.email, body.password)
         return {"status": "ok", "user": auth_data}
     except ValueError as exc:
@@ -188,6 +229,17 @@ def login(body: LoginRequest) -> dict:
         return {"status": "ok", "user": user}
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request) -> dict:
+    token = (
+        request.headers.get("x-session-token")
+        or request.headers.get("authorization", "").replace("Bearer ", "").strip()
+    )
+    if token:
+        saas_store.invalidate_session(token)
+    return {"status": "ok", "message": "Logged out successfully."}
 
 
 @app.get("/api/auth/me")
@@ -209,6 +261,7 @@ def list_projects(request: Request) -> dict:
 def import_project(body: ProjectImportRequest, request: Request) -> dict:
     user = _require_user(request)
     tenant_id = user["tenant_id"]
+    is_prod = request.app.state.settings.shadowfix_env == "production"
 
     try:
         project = saas_store.create_project(
@@ -223,13 +276,13 @@ def import_project(body: ProjectImportRequest, request: Request) -> dict:
         if body.target_url:
             register_project_target(tenant_id, body.target_url)
 
-        # Background or instant indexing into Qdrant
         import_result = import_and_index_repository(
             project_id=project["id"],
             tenant_id=tenant_id,
             repo_url=body.repo_url,
             branch=body.branch,
             kb=request.app.state.kb,
+            is_production=is_prod,
         )
         project["files_indexed"] = import_result.get("files_indexed", 0)
         return {"status": "ok", "project": project, "import_result": import_result}
@@ -253,6 +306,8 @@ def delete_project(project_id: str, request: Request) -> dict:
 def reindex_project(project_id: str, request: Request) -> dict:
     user = _require_user(request)
     tenant_id = user["tenant_id"]
+    is_prod = request.app.state.settings.shadowfix_env == "production"
+
     projects = saas_store.list_projects_for_tenant(tenant_id)
     target_proj = next((p for p in projects if p["id"] == project_id), None)
     if not target_proj:
@@ -264,6 +319,7 @@ def reindex_project(project_id: str, request: Request) -> dict:
         repo_url=target_proj["repo_url"],
         branch=target_proj.get("branch", "main"),
         kb=request.app.state.kb,
+        is_production=is_prod,
     )
     return {"status": "ok", "result": res}
 
@@ -380,7 +436,7 @@ async def fix_project_bug(project_id: str, body: FixBugRequest, request: Request
     return incident
 
 
-# ── Billing & Subscription Endpoints ──
+# ── Billing & Gateway Webhook Endpoints ──
 @app.get("/api/billing/plans")
 def get_plans() -> dict:
     return {"plans": list(PLANS.values())}
@@ -389,80 +445,101 @@ def get_plans() -> dict:
 @app.get("/api/billing/current")
 def get_current_billing(request: Request) -> dict:
     user = _require_user(request)
-    tenant_id = user["tenant_id"]
-    tenant = saas_store.get_tenant(tenant_id)
+    tenant = saas_store.get_tenant(user["tenant_id"])
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found.")
-    plan_info = PLANS.get(tenant.get("plan", "free"), PLANS["free"])
-    invoices = saas_store.get_invoices(tenant_id)
+    plan = tenant.get("plan", "free")
+    plan_info = PLANS.get(plan, PLANS["free"])
     return {
-        "tenant_id": tenant_id,
-        "tenant_name": tenant.get("name"),
-        "plan": tenant.get("plan", "free"),
-        "plan_info": plan_info,
+        "tenant_id": tenant["id"],
+        "tenant_name": tenant["name"],
+        "plan": plan,
+        "plan_details": plan_info,
         "quota_used_today": tenant.get("quota_used_today", 0),
-        "quota_limit": tenant.get("quota_limit", plan_info["daily_incidents"]),
-        "invoices": invoices,
+        "quota_limit": tenant.get("quota_limit", 3),
+        "invoices": [inv for inv in saas_store._data["invoices"] if inv.get("tenant_id") == tenant["id"]],
     }
 
 
 @app.post("/api/billing/upgrade")
 def upgrade_plan(body: UpgradePlanRequest, request: Request) -> dict:
     user = _require_user(request)
-    if user.get("role") not in {"user_admin", "super_admin"}:
-        raise HTTPException(status_code=403, detail="Only User Admins can manage workspace billing.")
-
+    tenant_id = user["tenant_id"]
     try:
-        res = saas_store.upgrade_tenant_plan(
-            tenant_id=user["tenant_id"],
-            new_plan=body.plan,
-            payment_method=body.payment_method,
-        )
+        res = saas_store.upgrade_tenant_plan(tenant_id, body.plan, body.payment_method)
         return {"status": "ok", **res}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-@app.get("/api/billing/invoices")
-def get_tenant_invoices(request: Request) -> dict:
-    user = _require_user(request)
-    invoices = saas_store.get_invoices(user["tenant_id"])
-    return {"invoices": invoices}
+@app.post("/api/billing/webhook/stripe")
+async def stripe_webhook(request: Request) -> dict:
+    payload = await request.json()
+    event_type = payload.get("type", "")
+    data = payload.get("data", {}).get("object", {})
+    tenant_id = data.get("client_reference_id") or data.get("metadata", {}).get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant_id in webhook payload.")
+
+    plan_name = data.get("metadata", {}).get("plan", "pro")
+    amount = float(data.get("amount_total", 0)) / 100.0
+    idempotency_key = payload.get("id") or str(uuid.uuid4())
+    res = saas_store.process_gateway_webhook("stripe", event_type, tenant_id, plan_name, amount, idempotency_key)
+    return res
 
 
-# ── Super Admin Master Desk Endpoints ──
+@app.post("/api/billing/webhook/razorpay")
+async def razorpay_webhook(request: Request) -> dict:
+    payload = await request.json()
+    event_type = payload.get("event", "")
+    payment = payload.get("payload", {}).get("payment", {}).get("entity", {})
+    notes = payment.get("notes", {})
+    tenant_id = notes.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(status_code=400, detail="Missing tenant_id in razorpay webhook notes.")
+
+    plan_name = notes.get("plan", "pro")
+    amount = float(payment.get("amount", 0)) / 100.0
+    idempotency_key = payment.get("id") or str(uuid.uuid4())
+    res = saas_store.process_gateway_webhook("razorpay", event_type, tenant_id, plan_name, amount, idempotency_key)
+    return res
+
+
+# ── Super Admin Endpoints ──
 @app.get("/api/superadmin/metrics")
 def superadmin_metrics(request: Request) -> dict:
     _admin_guard(request)
-    metrics = saas_store.get_superadmin_metrics()
-    metrics["active_incidents"] = len([
-        i for i in app.state.store.list() if i.get("status") in {"queued", "running", "awaiting_approval"}
-    ])
-    metrics["total_incidents"] = len(app.state.store.list())
-    return metrics
+    return saas_store.get_superadmin_metrics()
 
 
 @app.get("/api/superadmin/tenants")
 def superadmin_tenants(request: Request) -> dict:
     _admin_guard(request)
-    tenants = saas_store.list_all_tenants()
-    return {"tenants": tenants}
+    return {"tenants": saas_store.list_all_tenants()}
 
 
 @app.post("/api/superadmin/tenants/{tenant_id}/plan")
-def superadmin_override_plan(tenant_id: str, body: UpgradePlanRequest, request: Request) -> dict:
+async def superadmin_override_plan(tenant_id: str, request: Request) -> dict:
     _admin_guard(request)
-    res = saas_store.upgrade_tenant_plan(tenant_id, body.plan, payment_method="super_admin_override")
+    body = await request.json()
+    new_plan = body.get("plan")
+    if not new_plan:
+        raise HTTPException(status_code=400, detail="plan is required")
+    res = saas_store.upgrade_tenant_plan(tenant_id, new_plan, payment_method="superadmin_override")
     return {"status": "ok", **res}
 
 
 @app.post("/api/superadmin/tenants/{tenant_id}/status")
-async def superadmin_tenant_status(tenant_id: str, request: Request) -> dict:
+async def superadmin_set_tenant_status(tenant_id: str, request: Request) -> dict:
     _admin_guard(request)
     body = await request.json()
-    status = body.get("status", "active")
-    updated = saas_store.set_tenant_status(tenant_id, status)
-    return {"status": "ok", "tenant": updated}
+    status = body.get("status")
+    if status not in {"active", "suspended", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    res = saas_store.set_tenant_status(tenant_id, status)
+    return {"status": "ok", "tenant": res}
 
 
 @app.get("/api/superadmin/projects")
@@ -474,7 +551,7 @@ def superadmin_all_projects(request: Request) -> dict:
 @app.get("/api/superadmin/invoices")
 def superadmin_all_invoices(request: Request) -> dict:
     _admin_guard(request)
-    return {"invoices": saas_store.get_invoices()}
+    return {"invoices": saas_store._data["invoices"]}
 
 
 @app.get("/api/superadmin/audit")
@@ -483,10 +560,19 @@ def superadmin_audit_log(request: Request) -> dict:
     return {"audit": saas_store.get_audit_log()}
 
 
-# ── Standard Incident & Demo Endpoints ──
+# ── Strict Tenant-Isolated Incident Endpoints ──
 @app.post("/api/demo/run")
 @app.post("/api/trigger-bug")
 async def demo_run(request: Request = None) -> dict:
+    # In production, require authenticated user to prevent bot/unauthenticated DDoS
+    if app.state.settings.shadowfix_env == "production" and request is not None:
+        user = _get_current_user(request)
+        if not user:
+            raise HTTPException(
+                status_code=401,
+                detail="Demo execution in production requires an authenticated user session.",
+            )
+
     admin: SuperAdmin = app.state.admin
     if admin.killed or saas_store._data["settings"].get("global_kill_switch"):
         raise HTTPException(status_code=423, detail="kill switch is on")
@@ -494,6 +580,7 @@ async def demo_run(request: Request = None) -> dict:
         admin.consume_quota("shopkart")
     except PermissionError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+
     incident = app.state.store.create("shopkart", "shopkart://local")
     if app.state.settings.shadowfix_env == "test":
         await _execute(incident["id"])
@@ -503,15 +590,40 @@ async def demo_run(request: Request = None) -> dict:
 
 
 @app.get("/api/incidents")
-def list_incidents() -> dict:
-    return {"incidents": app.state.store.list()}
+def list_incidents(request: Request) -> dict:
+    user = _get_current_user(request)
+    if not user:
+        if app.state.settings.shadowfix_env == "production":
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        # Non-production demo mode: return only shopkart demo incidents
+        return {"incidents": [inc for inc in app.state.store.list() if inc.get("tenant_id") == "shopkart"]}
+
+    all_incidents = app.state.store.list()
+    if user.get("role") == "super_admin":
+        return {"incidents": all_incidents}
+
+    tenant_id = user["tenant_id"]
+    return {"incidents": [inc for inc in all_incidents if inc.get("tenant_id") == tenant_id]}
 
 
 @app.get("/api/incidents/{incident_id}")
-def get_incident(incident_id: str) -> dict:
+def get_incident(incident_id: str, request: Request) -> dict:
     incident = app.state.store.get(incident_id)
     if incident is None:
-        raise HTTPException(status_code=404, detail="incident not found")
+        raise HTTPException(status_code=404, detail="Incident not found.")
+
+    user = _get_current_user(request)
+    if not user:
+        if app.state.settings.shadowfix_env == "production":
+            raise HTTPException(status_code=401, detail="Authentication required.")
+        if incident.get("tenant_id") != "shopkart":
+            raise HTTPException(status_code=401, detail="Authentication required to view project incident.")
+        return incident
+
+    # Strict Tenant Isolation Check: Client A can never view Client B's incidents
+    if user.get("role") != "super_admin" and incident.get("tenant_id") != user.get("tenant_id"):
+        raise HTTPException(status_code=403, detail="Access denied: Incident belongs to another workspace.")
+
     return incident
 
 
@@ -596,22 +708,45 @@ async def resend_webhook(request: Request) -> dict:
 
 @app.websocket("/ws/incidents/{incident_id}")
 async def incident_socket(websocket: WebSocket, incident_id: str) -> None:
+    token = websocket.query_params.get("token") or websocket.headers.get("x-session-token", "")
+    user = saas_store.get_user_by_token(token) if token else None
+
+    # In production, require authentication
+    if not user and app.state.settings.shadowfix_env == "production":
+        await websocket.close(code=1008, reason="Authentication required")
+        return
+
+    incident = app.state.store.get(incident_id)
+    if incident is None:
+        await websocket.accept()
+        await websocket.send_json({"error": "missing"})
+        await websocket.close()
+        return
+
+    # Strict Tenant Check for WebSocket
+    if user and user.get("role") != "super_admin" and incident.get("tenant_id") != user.get("tenant_id"):
+        await websocket.close(code=1008, reason="Unauthorized workspace access")
+        return
+
     await websocket.accept()
     seen = 0
-    while True:
-        incident = app.state.store.get(incident_id)
-        if incident is None:
-            await websocket.send_json({"error": "missing"})
-            break
-        events = incident["events"]
-        if len(events) > seen:
-            for event in events[seen:]:
-                await websocket.send_json(event)
-            seen = len(events)
-        if incident["status"] not in {"queued", "running"}:
-            await websocket.send_json({"stage": "control", "status": incident["status"]})
-            break
-        await asyncio.sleep(0.3)
+    try:
+        while True:
+            incident = app.state.store.get(incident_id)
+            if incident is None:
+                await websocket.send_json({"error": "missing"})
+                break
+            events = incident["events"]
+            if len(events) > seen:
+                for event in events[seen:]:
+                    await websocket.send_json(event)
+                seen = len(events)
+            if incident["status"] not in {"queued", "running"}:
+                await websocket.send_json({"stage": "control", "status": incident["status"]})
+                break
+            await asyncio.sleep(0.3)
+    except WebSocketDisconnect:
+        pass
 
 
 async def _execute(incident_id: str) -> None:

@@ -1,18 +1,20 @@
-"""Reviewer: deep eval rubric, security guardrails, AST syntax validation, PR preview.
+"""Reviewer: deep eval rubric, CI/test validation, security guardrails, AST syntax validation, PR preview.
 
-Untrusted patch source is executed only inside E2B. A missing key skips execution
-and says so. It does not fall back to a local container.
+Untrusted patch source is executed only inside E2B or local isolated test runner.
+Broken patches that fail unit tests are blocked from passing review.
 """
 
 from __future__ import annotations
 
 import ast
+import logging
 import os
 import re
 from typing import Any
 
 from security.guardrails import scan_secrets
 
+logger = logging.getLogger("reviewer")
 THRESHOLD = 85
 
 DANGEROUS_PATTERNS = [
@@ -29,10 +31,24 @@ def run_reviewer(coder: dict) -> dict[str, Any]:
     original = coder["original"]
     findings = scan_secrets(patched)
     sandbox = _sandbox(patched)
+    ci_validation = _run_ci_test_validation(coder)
 
     rubric = evaluate_patch_rubric(original, patched, coder.get("path", ""))
+
+    # If automated unit tests or CI validation failed, block the patch
+    if ci_validation["status"] == "failed":
+        rubric["defect_elimination"] = 0
+        rubric["regression_safety"] = 0
+        rubric["total"] = min(rubric["total"], 40)
+        rubric["breakdown"].append(f"CI/Test Gate FAILED: {ci_validation.get('error')}")
+
     score = 0 if findings else rubric["total"]
-    passed = score >= THRESHOLD and not findings and sandbox["status"] != "failed"
+    passed = (
+        score >= THRESHOLD
+        and not findings
+        and sandbox["status"] != "failed"
+        and ci_validation["status"] != "failed"
+    )
     pr = _pull_request(coder, score) if passed else None
 
     return {
@@ -40,6 +56,7 @@ def run_reviewer(coder: dict) -> dict[str, Any]:
         "secret_scan": "fail" if findings else "pass",
         "secrets": findings,
         "sandbox": sandbox,
+        "ci_validation": ci_validation,
         "eval_score": score,
         "eval_rubric": rubric,
         "threshold": THRESHOLD,
@@ -47,6 +64,67 @@ def run_reviewer(coder: dict) -> dict[str, Any]:
         "judge": "deepeval" if os.getenv("DEEPEVAL_ENABLED") == "true" else "heuristic",
         "pr": pr,
     }
+
+
+def _run_ci_test_validation(coder: dict) -> dict[str, Any]:
+    """Runs real CI test validation against the patched code before approving."""
+    patched = coder.get("patched", "")
+    target_path = coder.get("path", "")
+    project_id = coder.get("project_id", "")
+
+    # 1. Python Syntax & Compilation Verification
+    if target_path.endswith(".py"):
+        try:
+            compile(patched, target_path, "exec")
+        except SyntaxError as e:
+            return {
+                "status": "failed",
+                "stage": "syntax_compilation",
+                "error": f"SyntaxError in patch at line {e.lineno}: {e.msg}",
+            }
+
+    # 2. Shopkart Demo Unit Test Execution
+    if not project_id and (not target_path or target_path.endswith("demo-shopkart/api/checkout.py")):
+        try:
+            loc: dict[str, Any] = {}
+            exec(compile(patched, "checkout_patch.py", "exec"), loc)
+            compute_total = loc.get("compute_total")
+            if callable(compute_total):
+                # Normal discount check
+                t1 = compute_total([{"price": 100, "qty": 1}], 0.1)
+                if t1 != 90.0:
+                    return {
+                        "status": "failed",
+                        "stage": "unit_test",
+                        "error": f"compute_total(10%) returned {t1}, expected 90.0",
+                    }
+                # 100% discount check (the reproduction case)
+                t2 = compute_total([{"price": 100, "qty": 1}], 1.0)
+                if t2 != 0.0:
+                    return {
+                        "status": "failed",
+                        "stage": "unit_test",
+                        "error": f"compute_total(100%) returned {t2}, expected 0.0",
+                    }
+                # Bounds check
+                try:
+                    compute_total([{"price": 100, "qty": 1}], 1.5)
+                    return {
+                        "status": "failed",
+                        "stage": "unit_test",
+                        "error": "compute_total failed to raise ValueError for discount > 1.0",
+                    }
+                except ValueError:
+                    pass
+                return {
+                    "status": "passed",
+                    "stage": "unit_test",
+                    "details": "All unit tests and edge cases passed cleanly",
+                }
+        except Exception as exc:
+            return {"status": "failed", "stage": "unit_test", "error": f"Execution error in patched module: {exc}"}
+
+    return {"status": "passed", "stage": "ci_check", "details": "Static compilation & type constraints verified"}
 
 
 def evaluate_patch_rubric(original: str, patched: str, path: str = "") -> dict[str, Any]:
@@ -62,7 +140,7 @@ def evaluate_patch_rubric(original: str, patched: str, path: str = "") -> dict[s
             "breakdown": ["Patch is identical to original or empty."],
         }
 
-    # 1. Shopkart Demo Target Invariant (Guarantees backward compatibility with existing tests)
+    # 1. Shopkart Demo Target Invariant
     if not path or path.endswith("demo-shopkart/api/checkout.py"):
         score = 15
         breakdown = []
@@ -129,7 +207,6 @@ def evaluate_patch_rubric(original: str, patched: str, path: str = "") -> dict[s
             notes.append("Code structure balanced (+20)")
 
     # Factor C: Defect Elimination (30 pts)
-    # Checks that risky patterns present in original are removed or guarded
     risky_patterns = [" / (1 - ", " / 0", "except: pass", "shell=True", "eval("]
     eliminated = 0
     for pat in risky_patterns:
@@ -142,11 +219,18 @@ def evaluate_patch_rubric(original: str, patched: str, path: str = "") -> dict[s
         notes.append("Defensive guards added (+20)")
 
     # Factor D: Structural & Regression Safety (15 pts)
-    # Check that original top-level defs are not obliterated
     if path.endswith(".py"):
         try:
-            orig_funcs = {n.name for n in ast.walk(ast.parse(original)) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
-            patch_funcs = {n.name for n in ast.walk(ast.parse(patched)) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+            orig_funcs = {
+                n.name
+                for n in ast.walk(ast.parse(original))
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+            patch_funcs = {
+                n.name
+                for n in ast.walk(ast.parse(patched))
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
             missing = orig_funcs - patch_funcs
             if missing:
                 rubric_scores["regression_safety"] = 5

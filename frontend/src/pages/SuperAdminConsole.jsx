@@ -25,7 +25,7 @@ const TABS = [
 export default function SuperAdminConsole() {
   const { isSuperAdmin } = useAuth();
   const [adminKey, setAdminKey] = useState(
-    () => sessionStorage.getItem(ADMIN_KEY_STORAGE) || "Shadowfix@4321"
+    () => sessionStorage.getItem(ADMIN_KEY_STORAGE) || ""
   );
   const [tab, setTab] = useState("Master KPI");
   const [metrics, setMetrics] = useState(null);

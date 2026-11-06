@@ -1,11 +1,27 @@
 export async function runDemo() {
-  const response = await fetch("/api/demo/run", { method: "POST" });
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const response = await fetch("/api/demo/run", {
+    method: "POST",
+    headers: { "X-Session-Token": token },
+  });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }
 
 export async function getIncident(id) {
-  const response = await fetch(`/api/incidents/${id}`);
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const response = await fetch(`/api/incidents/${id}`, {
+    headers: { "X-Session-Token": token },
+  });
+  if (!response.ok) throw new Error(await response.text());
+  return response.json();
+}
+
+export async function listIncidents() {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const response = await fetch("/api/incidents", {
+    headers: { "X-Session-Token": token },
+  });
   if (!response.ok) throw new Error(await response.text());
   return response.json();
 }

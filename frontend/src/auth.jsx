@@ -37,10 +37,6 @@ export function AuthProvider({ children }) {
         if (data?.user) {
           setUser(data.user);
           localStorage.setItem(USER_KEY, JSON.stringify(data.user));
-          if (data.user.role === "super_admin") {
-            setAdminKeyState("Shadowfix@4321");
-            sessionStorage.setItem(ADMIN_KEY_STORAGE, "Shadowfix@4321");
-          }
         }
       })
       .catch(() => {});
@@ -87,14 +83,17 @@ export function AuthProvider({ children }) {
     setUser(authUser);
     localStorage.setItem(TOKEN_KEY, authUser.token);
     localStorage.setItem(USER_KEY, JSON.stringify(authUser));
-    if (authUser.role === "super_admin") {
-      setAdminKeyState("Shadowfix@4321");
-      sessionStorage.setItem(ADMIN_KEY_STORAGE, "Shadowfix@4321");
-    }
     return authUser;
   }, []);
 
   const signOut = useCallback(() => {
+    const curToken = localStorage.getItem(TOKEN_KEY);
+    if (curToken) {
+      fetch("/api/auth/logout", {
+        method: "POST",
+        headers: { "X-Session-Token": curToken },
+      }).catch(() => {});
+    }
     localStorage.removeItem(TOKEN_KEY);
     localStorage.removeItem(USER_KEY);
     sessionStorage.removeItem(ADMIN_KEY_STORAGE);

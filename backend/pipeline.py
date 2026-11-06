@@ -2,22 +2,45 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 
 from knowledge.ast_chunker import chunk_source
 from knowledge.mem0_rules import TenantMemory
 from knowledge.qdrant_prod import AstKnowledgeBase
 from orchestration.graph import build_graph
-from paths import DEMO_ROOT
+from paths import DATA_DIR, DEMO_ROOT
 from security.guardrails import assert_target_allowed, require_tenant
+
+INCIDENTS_FILE = DATA_DIR / "incidents.json"
 
 
 class IncidentStore:
-    def __init__(self) -> None:
+    def __init__(self, file_path: Path = INCIDENTS_FILE) -> None:
+        self.file_path = file_path
         self._items: dict[str, dict] = {}
         self._lock = threading.Lock()
+        self._load()
+
+    def _load(self) -> None:
+        if self.file_path.exists():
+            try:
+                content = self.file_path.read_text(encoding="utf-8")
+                loaded = json.loads(content)
+                if isinstance(loaded, dict):
+                    self._items.update(loaded)
+            except Exception:
+                pass
+
+    def _save(self) -> None:
+        try:
+            self.file_path.parent.mkdir(parents=True, exist_ok=True)
+            self.file_path.write_text(json.dumps(self._items, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def create(self, tenant_id: str, target: str, **kwargs) -> dict:
         tenant = require_tenant(tenant_id)
@@ -35,6 +58,7 @@ class IncidentStore:
         }
         with self._lock:
             self._items[incident["id"]] = incident
+            self._save()
         return incident
 
     def get(self, incident_id: str) -> dict | None:
@@ -50,11 +74,13 @@ class IncidentStore:
         with self._lock:
             item = self._items[incident_id]
             item.update(fields)
+            self._save()
             return _copy(item)
 
     def append_event(self, incident_id: str, event: dict) -> None:
         with self._lock:
             self._items[incident_id]["events"].append(event)
+            self._save()
 
 
 def index_demo(kb: AstKnowledgeBase, tenant_id: str = "shopkart") -> int:
