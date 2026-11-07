@@ -306,6 +306,63 @@ export default function FigmaAndChaos() {
                   </div>
                 )}
 
+                {/* Live Scraped Target Page DOM Summary */}
+                <div className="card p-6 border-l-4 border-l-mint">
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                    <h4 className="font-bold text-xs uppercase text-mute tracking-wider">
+                      Live Scraped Target DOM
+                    </h4>
+                    <span className="font-mono text-[11px] text-mint font-bold">
+                      {figmaResult.dom_summary?.html_size_kb ? `${figmaResult.dom_summary.html_size_kb} KB Scanned` : "DOM Parsed"}
+                    </span>
+                  </div>
+
+                  <div className="space-y-2 text-xs">
+                    <div>
+                      <span className="text-mute text-[10px] block">Target Page Title:</span>
+                      <p className="font-bold text-paper text-sm">{figmaResult.page_title}</p>
+                    </div>
+
+                    {figmaResult.dom_summary?.buttons_found?.length > 0 && (
+                      <div className="pt-1">
+                        <span className="text-mute text-[10px] block">Scraped Buttons & CTAs:</span>
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {figmaResult.dom_summary.buttons_found.map((b, i) => (
+                            <span key={i} className="rounded-lg bg-panel-2 border border-line px-2.5 py-1 font-mono text-[11px] text-paper">
+                              "{b}"
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {figmaResult.dom_summary?.headings_found?.length > 0 && (
+                      <div className="pt-1">
+                        <span className="text-mute text-[10px] block">Detected H1 / H2 Headings:</span>
+                        <p className="font-mono text-[11px] text-mute italic mt-0.5">
+                          "{figmaResult.dom_summary.headings_found[0]}"
+                        </p>
+                      </div>
+                    )}
+
+                    {figmaResult.dom_summary?.color_palette?.length > 0 && (
+                      <div className="pt-1 flex items-center gap-2">
+                        <span className="text-mute text-[10px]">Live Palette:</span>
+                        <div className="flex items-center gap-1.5">
+                          {figmaResult.dom_summary.color_palette.map((c, i) => (
+                            <span
+                              key={i}
+                              title={c}
+                              className="h-3.5 w-3.5 rounded-full border border-line inline-block"
+                              style={{ backgroundColor: c }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 {/* Design Tokens Extracted */}
                 <div className="card p-6">
                   <h4 className="font-bold text-xs uppercase text-mute tracking-wider mb-3">
@@ -372,6 +429,15 @@ export default function FigmaAndChaos() {
                               {bug.severity}
                             </span>
                           </div>
+
+                          {/* Target Page & Component Location */}
+                          {bug.page_location && (
+                            <div className="rounded-lg bg-panel px-3 py-1.5 font-mono text-[10px] text-mute flex flex-col gap-0.5 border border-line">
+                              <span><strong className="text-paper">Page:</strong> {bug.page_location}</span>
+                              {bug.component_hint && <span><strong className="text-paper">Component:</strong> {bug.component_hint}</span>}
+                            </div>
+                          )}
+
                           <p className="text-mute text-[11px]">{bug.description}</p>
                           <div className="flex flex-wrap gap-4 pt-1 font-mono text-[11px]">
                             <span className="text-mint">Expected: {bug.figma_expected}</span>

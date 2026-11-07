@@ -755,7 +755,7 @@ class SaaSStore:
 
     def get_audit_log(self, limit: int = 100) -> list[dict[str, Any]]:
         with self._lock:
-            return sorted(self._data["audit_log"], key=lambda x: x["timestamp"], reverse=True)[:limit]
+            return sorted(self._data.get("audit_log", []), key=lambda x: x.get("timestamp") or x.get("created_at") or "", reverse=True)[:limit]
 
     def _record_audit_locked(self, action: str, details: str) -> None:
         self._data["audit_log"].append({
