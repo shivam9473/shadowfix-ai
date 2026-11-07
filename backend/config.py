@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     paypal_webhook_id: str = ""
     paypal_mode: str = "sandbox"
 
+    # Redis & Distributed Caching / Queues
+    redis_url: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -77,6 +80,7 @@ def get_settings() -> Settings:
         "PAYPAL_CLIENT_SECRET": settings.paypal_client_secret,
         "PAYPAL_WEBHOOK_ID": settings.paypal_webhook_id,
         "PAYPAL_MODE": settings.paypal_mode,
+        "REDIS_URL": settings.redis_url,
     }
     for key, val in mapping.items():
         if val:

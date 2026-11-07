@@ -51,6 +51,8 @@ from project_importer import import_and_index_repository
 from saas_db import PLANS, saas_store
 
 from services.payment_service import payment_service
+from services.redis_service import redis_service
+from services.job_queue import job_queue
 
 from security.aws_jit import ApprovalLedger, mint_jit_credentials, public_view
 
@@ -94,6 +96,7 @@ async def lifespan(app: FastAPI):
     app.state.store = IncidentStore()
     app.state.admin = SuperAdmin(quota_per_day=settings.quota_per_day)
     app.state.ledger = ApprovalLedger()
+    job_queue.start_worker()
     index_demo(app.state.kb)
     yield
 
@@ -143,7 +146,13 @@ def _get_current_user(request: Request) -> dict[str, Any] | None:
     )
     if not token:
         return None
-    return saas_store.get_user_by_token(token)
+    cached = redis_service.get_cached_session(token)
+    if cached:
+        return cached
+    user = saas_store.get_user_by_token(token)
+    if user:
+        redis_service.cache_session(token, user, ttl_seconds=1800)
+    return user
 
 def _require_user(request: Request) -> dict[str, Any]:
 
@@ -246,6 +255,7 @@ def health() -> dict:
         "qdrant": app.state.settings.qdrant_mode,
         "eval_threshold": app.state.settings.eval_threshold,
         "saas_active": True,
+        "redis": redis_service.health_check(),
     }
 
 @app.get("/api/health/live")
@@ -309,6 +319,7 @@ def logout(request: Request) -> dict:
     )
     if token:
         saas_store.invalidate_session(token)
+        redis_service.invalidate_session(token)
     return {"status": "ok", "message": "Logged out successfully."}
 
 @app.get("/api/auth/me")
@@ -1049,3 +1060,10 @@ async def _execute(incident_id: str) -> None:
     except Exception as exc:
         app.state.store.update(incident_id, status="failed", error=str(exc))
         app.state.store.append_event(incident_id, {"stage": "control", "status": "failed", "summary": str(exc)})
+@app.get("/api/jobs/{job_id}")
+def get_job_status(job_id: str, request: Request) -> dict:
+    _require_user(request)
+    job = job_queue.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job

@@ -10,3 +10,4 @@ PyGithub>=2.6
 httpx>=0.28
 PyYAML>=6.0
 pytest>=8.3
+redis>=5.0.0
