@@ -113,22 +113,24 @@ app.add_middleware(RequestTracingMiddleware)
 
 app.add_middleware(RateLimitMiddleware, max_requests=120, window_seconds=60)
 
-allowed_origins = os.getenv(
-
-    "ALLOWED_ORIGINS",
-    "http://127.0.0.1:5173,http://localhost:5173,http://127.0.0.1:5183,http://localhost:5183",
-
-).split(",")
-
-app.add_middleware(
-
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-
-)
+allowed_origins_raw = os.getenv("ALLOWED_ORIGINS", "*").strip()
+if allowed_origins_raw == "*" or not allowed_origins_raw:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://.*",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    allowed_list = [o.strip() for o in allowed_origins_raw.split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=allowed_list,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 @app.middleware("http")
 
