@@ -1159,13 +1159,13 @@ def fix_figma_ui_bugs(body: FigmaFixRequest, request: Request) -> dict:
     user = _require_user(request)
     tenant_id = user["tenant_id"]
 
-    # Target directory
+    from paths import REPO_ROOT
     if body.project_id:
         target_dir = DATA_DIR / "imported_repos" / body.project_id
         if not target_dir.exists():
-            target_dir = Path("frontend/src")
+            target_dir = REPO_ROOT / "frontend" / "src"
     else:
-        target_dir = Path("frontend/src")
+        target_dir = REPO_ROOT / "frontend" / "src" 
 
     try:
         res = figma_service.auto_fix_figma_bugs(target_dir, body.bug_ids)
