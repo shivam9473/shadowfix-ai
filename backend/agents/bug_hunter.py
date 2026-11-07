@@ -542,26 +542,34 @@ def hunt_all_bugs_in_project(project_dir: Path, max_files: int = 150) -> list[De
 
 
 def run_dynamic_test_runner(project_dir: Path) -> dict[str, Any] | None:
-    """Execute project test suite (pytest or unittest) if tests exist, capturing real tracebacks."""
+    """Safely check for test failures. Host-level dynamic execution is strictly disallowed
+    for untrusted imported repositories to prevent Remote Code Execution (RCE).
+    """
     if not project_dir.exists():
         return None
 
-    # Check for pytest / unittest
+    # Check for pytest / unittest files
     test_files = list(project_dir.glob("test_*.py")) + list(project_dir.glob("tests/*.py"))
     if not test_files:
         return None
 
+    # Host execution is blocked for security; only isolated sandbox (e.g. E2B) is permitted
+    e2b_key = os.getenv("E2B_API_KEY", "").strip()
+    if not e2b_key:
+        logger.info("Host dynamic pytest disabled for repository security (AST static scan active)")
+        return None
+
+    # If E2B key present, untrusted execution is delegated to isolated disposable cloud sandbox
     try:
-        # Use sys.executable to ensure the current running python environment executes pytest
-        cmd = [sys.executable, "-m", "pytest", "-q", "--maxfail=1", str(project_dir)]
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
-        if res.returncode != 0 and (res.stdout or res.stderr):
-            output = (res.stdout + "\n" + res.stderr).strip()
-            return {
-                "runner": "pytest",
-                "output": output,
-                "error": "Pytest Test Failure Detected",
-            }
+        from e2b_code_interpreter import Sandbox
+        with Sandbox(api_key=e2b_key) as sbx:
+            execution = sbx.run_code(f"import pytest; pytest.main(['-q', '{project_dir}'])")
+            if execution.error:
+                return {
+                    "runner": "e2b_sandbox_pytest",
+                    "output": execution.error.value,
+                    "error": "Sandbox Pytest Failure Detected",
+                }
     except Exception as exc:
-        logger.warning(f"Test runner error: {exc}")
+        logger.warning(f"Sandbox runner error: {exc}")
     return None

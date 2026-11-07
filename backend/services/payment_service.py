@@ -115,13 +115,24 @@ class PaymentService:
         if not order_id or not payment_id or not signature:
             return False
 
-        # In sandbox mode with mock order
+        # In production, strictly reject all mock signatures and require real secret
+        is_prod = self.settings.shadowfix_env == "production"
+        if is_prod:
+            if order_id.startswith("order_rzp_mock_"):
+                return False
+            secret = self.settings.razorpay_key_secret
+            if not secret:
+                return False
+            message = f"{order_id}|{payment_id}".encode("utf-8")
+            expected_sig = hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+            return secrets.compare_digest(expected_sig, signature)
+
+        # In non-production sandbox mode with mock order
         if order_id.startswith("order_rzp_mock_"):
             return signature.startswith("sig_mock_") or signature == "sandbox_verified"
 
         secret = self.settings.razorpay_key_secret
         if not secret:
-            # If no secret configured, accept sandbox test signature
             return signature.startswith("sig_mock_") or signature == "sandbox_verified"
 
         message = f"{order_id}|{payment_id}".encode("utf-8")
@@ -136,7 +147,9 @@ class PaymentService:
         """Validates webhook signature from Razorpay using RAZORPAY_WEBHOOK_SECRET."""
         secret = self.settings.razorpay_webhook_secret
         if not secret:
-            return True  # Sandbox passthrough if webhook secret not yet configured
+            if self.settings.shadowfix_env == "production":
+                return False
+            return True  # Sandbox passthrough in dev mode
         expected = hmac.new(secret.encode("utf-8"), body_bytes, hashlib.sha256).hexdigest()
         return secrets.compare_digest(expected, signature)
 

@@ -87,19 +87,12 @@ def _smart_user_patch(original: str, stack: str, path: str) -> str:
     if " / (1-discount)" in original:
         return original.replace(" / (1-discount)", " * (1-discount)")
 
-    # Python general defensive patch
-    if path.endswith(".py"):
-        header = "# [ShadowFix AI] Verified automated repair patch\n"
-        if "ZeroDivisionError" in stack and "return " in original:
-            return header + original.replace("return ", "if True:\n        pass\n    return ")
-        return header + original
-
-    # JS/TS general defensive patch
-    if path.endswith((".js", ".ts")):
-        header = "// [ShadowFix AI] Verified automated repair patch\n"
-        return header + original
-
-    return original
+    # If no deterministic template matches and Gemini AI is not configured,
+    # reject rather than injecting fake comments or dummy pass statements
+    raise ValueError(
+        "Automated repair for this codebase requires an intelligent AI model. "
+        "Please configure GEMINI_API_KEY to enable Gemini Pro AST patch generation."
+    )
 
 
 def _prompt(original: str, stack: str) -> str:

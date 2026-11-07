@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from paths import DATA_DIR
+from security.ssrf_safety import atomic_write_json
 
 logger = logging.getLogger("saas_db")
 DB_FILE = DATA_DIR / "saas_db.json"
@@ -148,8 +149,7 @@ class SaaSStore:
                 logger.warning("Could not load SaaS DB from %s: %s", self.file_path, exc)
 
     def _save(self) -> None:
-        self.file_path.parent.mkdir(parents=True, exist_ok=True)
-        self.file_path.write_text(json.dumps(self._data, indent=2), encoding="utf-8")
+        atomic_write_json(self.file_path, self._data)
 
     def _seed_defaults(self) -> None:
         with self._lock:
