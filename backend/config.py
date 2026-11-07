@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Redis & Distributed Caching / Queues
     redis_url: str = ""
 
+    # Figma Visual Testing & Design Tokens
+    figma_access_token: str = ""
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -81,6 +84,7 @@ def get_settings() -> Settings:
         "PAYPAL_WEBHOOK_ID": settings.paypal_webhook_id,
         "PAYPAL_MODE": settings.paypal_mode,
         "REDIS_URL": settings.redis_url,
+        "FIGMA_ACCESS_TOKEN": settings.figma_access_token,
     }
     for key, val in mapping.items():
         if val:

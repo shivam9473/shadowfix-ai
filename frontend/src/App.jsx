@@ -11,11 +11,13 @@ import Signup from "./pages/Signup";
 import Profile from "./pages/Profile";
 import Projects from "./pages/Projects";
 import Billing from "./pages/Billing";
+import FigmaAndChaos from "./pages/FigmaAndChaos";
 import { AgentsPage, FaqPage, SecurityPage } from "./pages/SitePages";
 
 // Main navigation items
 const NAV = [
   { to: "/agents", label: "Agents" },
+  { to: "/testing", label: "Figma & Chaos" },
   { to: "/security", label: "Security" },
   { to: "/demo", label: "Live demo" },
   { to: "/pricing", label: "Pricing" },
@@ -391,6 +393,7 @@ export default function App() {
         <Route path="/security" element={<SecurityPage />} />
         <Route path="/demo" element={<PublicDemo />} />
         <Route path="/pricing" element={<Billing />} />
+        <Route path="/testing" element={<FigmaAndChaos />} />
         <Route path="/projects" element={<Projects />} />
         <Route path="/faq" element={<FaqPage />} />
         <Route path="/login" element={<Login />} />

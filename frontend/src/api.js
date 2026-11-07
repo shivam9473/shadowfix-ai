@@ -264,3 +264,50 @@ export async function refundInvoice(invoiceId, reason = "") {
   if (!res.ok) throw new Error(body.detail || "Refund failed.");
   return body;
 }
+
+// ── Chaos & Load Testing APIs (Locust, Toxiproxy, JMeter) ──
+export async function runChaosTest(params) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/testing/chaos/run", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Chaos test failed.");
+  return body;
+}
+
+// ── Figma Visual UI Testing & Auto-Repair APIs ──
+export async function auditFigmaUI(params) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/testing/figma/audit", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Figma UI audit failed.");
+  return body;
+}
+
+export async function fixFigmaBugs(params) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/testing/figma/fix-bugs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(params),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Figma auto-fix failed.");
+  return body;
+}

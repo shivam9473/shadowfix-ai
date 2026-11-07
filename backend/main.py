@@ -53,6 +53,8 @@ from saas_db import PLANS, saas_store
 from services.payment_service import payment_service
 from services.redis_service import redis_service
 from services.job_queue import job_queue
+from services.chaos_testing import chaos_engine
+from services.figma_service import figma_service
 
 from security.aws_jit import ApprovalLedger, mint_jit_credentials, public_view
 
@@ -222,6 +224,28 @@ class PaypalCaptureRequest(BaseModel):
 
     order_id: str
     plan: str
+
+class ChaosTestRequest(BaseModel):
+    engine: str = "locust"  # locust | toxiproxy | jmeter
+    target_url: str
+    users: int = 10
+    duration_seconds: int = 15
+    spawn_rate: int = 2
+    endpoint_path: str = "/api/health"
+    toxic_type: str = "latency"
+    latency_ms: int = 500
+
+
+class FigmaAuditRequest(BaseModel):
+    figma_url: str
+    live_target_url: str
+    access_token: str = ""
+    project_id: str = ""
+
+
+class FigmaFixRequest(BaseModel):
+    project_id: str
+    bug_ids: list[str] = []
 
 class RefundRequest(BaseModel):
 
@@ -1067,3 +1091,84 @@ def get_job_status(job_id: str, request: Request) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+# ── Chaos & Automated Load Testing Endpoints ──
+@app.post("/api/testing/chaos/run")
+def run_chaos_and_load_test(body: ChaosTestRequest, request: Request) -> dict:
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+
+    engine_type = body.engine.lower().strip()
+    try:
+        if engine_type == "locust":
+            res = chaos_engine.run_locust_load_test(
+                target_url=body.target_url,
+                users=body.users,
+                spawn_rate=body.spawn_rate,
+                duration_seconds=body.duration_seconds,
+                endpoint_path=body.endpoint_path,
+                tenant_id=tenant_id,
+            )
+            return {"status": "ok", "result": res}
+
+        elif engine_type == "toxiproxy":
+            res = chaos_engine.run_toxiproxy_chaos(
+                proxy_name="target_service",
+                toxic_type=body.toxic_type,
+                latency_ms=body.latency_ms,
+                target_probe_url=body.target_url,
+            )
+            return {"status": "ok", "result": res}
+
+        elif engine_type == "jmeter":
+            res = chaos_engine.run_jmeter_plan(
+                jmx_plan_path="demo-shopkart/jmeter.jmx",
+                target_url=body.target_url,
+                threads=body.users,
+            )
+            return {"status": "ok", "result": res}
+
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported testing engine '{body.engine}'. Choose 'locust', 'toxiproxy', or 'jmeter'.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Chaos test execution failed: {exc}") from exc
+
+
+# ── Figma Visual UI Testing & Automated Bug Fix Endpoints ──
+@app.post("/api/testing/figma/audit")
+def audit_figma_ui(body: FigmaAuditRequest, request: Request) -> dict:
+    user = _require_user(request)
+    try:
+        res = figma_service.audit_ui_against_figma(
+            figma_url=body.figma_url,
+            live_target_url=body.live_target_url,
+            access_token=body.access_token,
+        )
+        return {"status": "ok", **res}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Figma UI audit failed: {exc}") from exc
+
+
+@app.post("/api/testing/figma/fix-bugs")
+def fix_figma_ui_bugs(body: FigmaFixRequest, request: Request) -> dict:
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+
+    # Target directory
+    if body.project_id:
+        target_dir = DATA_DIR / "imported_repos" / body.project_id
+        if not target_dir.exists():
+            target_dir = Path("frontend/src")
+    else:
+        target_dir = Path("frontend/src")
+
+    try:
+        res = figma_service.auto_fix_figma_bugs(target_dir, body.bug_ids)
+        return {"status": "ok", **res}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to apply Figma UI fixes: {exc}") from exc
