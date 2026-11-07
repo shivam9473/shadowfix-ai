@@ -131,6 +131,7 @@ def import_and_index_repository(
     tenant_id: str,
     repo_url: str,
     branch: str = "main",
+    access_token: str = "",
     kb: AstKnowledgeBase | None = None,
     is_production: bool = False,
 ) -> dict[str, Any]:
@@ -173,6 +174,16 @@ def import_and_index_repository(
     if project_dir.exists():
         shutil.rmtree(project_dir, ignore_errors=True)
 
+    token = (access_token or "").strip()
+    clone_url = clean_url
+    if token:
+        if "github.com" in clean_url:
+            raw = clean_url.replace("https://", "").replace("http://", "")
+            clone_url = f"https://{token}@{raw}"
+        elif "gitlab.com" in clean_url:
+            raw = clean_url.replace("https://", "").replace("http://", "")
+            clone_url = f"https://oauth2:{token}@{raw}"
+
     try:
         cmd = [
             "git",
@@ -182,7 +193,7 @@ def import_and_index_repository(
             "--single-branch",
             "--branch",
             clean_branch,
-            clean_url,
+            clone_url,
             str(project_dir),
         ]
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=CLONE_TIMEOUT_SECONDS)
@@ -194,7 +205,7 @@ def import_and_index_repository(
                 "--depth",
                 "1",
                 "--single-branch",
-                clean_url,
+                clone_url,
                 str(project_dir),
             ]
             fallback_res = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=CLONE_TIMEOUT_SECONDS)

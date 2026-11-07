@@ -200,6 +200,7 @@ class ProjectImportRequest(BaseModel):
     target_url: str = ""
     test_command: str = ""
     language: str = "python"
+    access_token: str = ""
 
 class UpgradePlanRequest(BaseModel):
 
@@ -395,6 +396,7 @@ def import_project(body: ProjectImportRequest, request: Request) -> dict:
             tenant_id=tenant_id,
             repo_url=body.repo_url,
             branch=body.branch,
+            access_token=body.access_token,
             kb=request.app.state.kb,
             is_production=is_prod,
         )

@@ -33,6 +33,7 @@ export default function Projects() {
     branch: "main",
     target_url: "http://127.0.0.1:8010",
     language: "python",
+    access_token: "",
   });
 
   async function loadProjects() {
@@ -70,6 +71,7 @@ export default function Projects() {
         branch: "main",
         target_url: "http://127.0.0.1:8010",
         language: "python",
+        access_token: "",
       });
       await loadProjects();
       setTimeout(() => setNotice(""), 4000);
@@ -471,6 +473,22 @@ export default function Projects() {
                   onChange={(e) => setForm({ ...form, repo_url: e.target.value })}
                   className="mt-1.5 w-full rounded-xl border border-line bg-ink px-4 py-2.5 text-sm text-paper focus:border-brand focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-mute uppercase">
+                  GitHub Personal Access Token (PAT) <span className="font-normal text-mute lowercase">(required for private repos)</span>
+                </label>
+                <input
+                  type="password"
+                  placeholder="ghp_xxxx or github_pat_xxxx (leave empty for public repos)"
+                  value={form.access_token || ""}
+                  onChange={(e) => setForm({ ...form, access_token: e.target.value })}
+                  className="mt-1.5 w-full rounded-xl border border-line bg-ink px-4 py-2.5 text-sm font-mono text-paper focus:border-brand focus:outline-none"
+                />
+                <p className="mt-1 text-[10px] text-mute">
+                  ShadowFix securely clones your private repository to index AST symbols. Tokens are never stored in logs.
+                </p>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
