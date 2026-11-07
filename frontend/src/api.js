@@ -188,3 +188,79 @@ export async function fetchSuperAdminInvoices(adminKey) {
 export async function fetchSuperAdminAudit(adminKey) {
   return adminFetch("/api/superadmin/audit", adminKey);
 }
+
+// ── Payment Gateway APIs (Razorpay & PayPal) ──
+export async function createRazorpayOrder(planId, currency = "INR") {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/billing/razorpay/create-order", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify({ plan: planId, currency }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Failed to create Razorpay order.");
+  return body;
+}
+
+export async function verifyRazorpayPayment(paymentData) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/billing/razorpay/verify-payment", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(paymentData),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Razorpay payment verification failed.");
+  return body;
+}
+
+export async function createPaypalOrder(planId) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/billing/paypal/create-order", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify({ plan: planId }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Failed to create PayPal order.");
+  return body;
+}
+
+export async function capturePaypalOrder(captureData) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/billing/paypal/capture-order", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(captureData),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "PayPal capture failed.");
+  return body;
+}
+
+export async function refundInvoice(invoiceId, reason = "") {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/billing/refund", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify({ invoice_id: invoiceId, reason }),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Refund failed.");
+  return body;
+}

@@ -40,6 +40,16 @@ class Settings(BaseSettings):
     eval_threshold: int = Field(default=85, ge=85, le=100)
     quota_per_day: int = 20
 
+    # Payment Gateways (Razorpay & PayPal)
+    razorpay_key_id: str = ""
+    razorpay_key_secret: str = ""
+    razorpay_webhook_secret: str = ""
+    razorpay_payment_link: str = "https://razorpay.me/@shivamkumar98"
+    paypal_client_id: str = ""
+    paypal_client_secret: str = ""
+    paypal_webhook_id: str = ""
+    paypal_mode: str = "sandbox"
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -59,6 +69,14 @@ def get_settings() -> Settings:
         "TOXIPROXY_API": settings.toxiproxy_api,
         "LOCUST_ENABLED": "true" if settings.locust_enabled else "",
         "SHOPKART_URL": settings.shopkart_url,
+        "RAZORPAY_KEY_ID": settings.razorpay_key_id,
+        "RAZORPAY_KEY_SECRET": settings.razorpay_key_secret,
+        "RAZORPAY_WEBHOOK_SECRET": settings.razorpay_webhook_secret,
+        "RAZORPAY_PAYMENT_LINK": settings.razorpay_payment_link,
+        "PAYPAL_CLIENT_ID": settings.paypal_client_id,
+        "PAYPAL_CLIENT_SECRET": settings.paypal_client_secret,
+        "PAYPAL_WEBHOOK_ID": settings.paypal_webhook_id,
+        "PAYPAL_MODE": settings.paypal_mode,
     }
     for key, val in mapping.items():
         if val:

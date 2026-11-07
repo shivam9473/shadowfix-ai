@@ -491,6 +491,124 @@ class SaaSStore:
 
             return {"status": "ignored", "event_type": event_type}
 
+    def get_invoices(self, tenant_id: str | None = None) -> list[dict[str, Any]]:
+        with self._lock:
+            invs = self._data["invoices"]
+            if tenant_id:
+                invs = [i for i in invs if i.get("tenant_id") == tenant_id]
+            return sorted(invs, key=lambda x: x.get("date", ""), reverse=True)
+
+    def record_successful_payment(
+        self,
+        tenant_id: str,
+        plan_name: str,
+        amount: float,
+        currency: str,
+        gateway: str,
+        order_id: str,
+        payment_id: str,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        with self._lock:
+            # Check idempotency
+            if idempotency_key:
+                for inv in self._data["invoices"]:
+                    if inv.get("idempotency_key") == idempotency_key or inv.get("payment_id") == payment_id:
+                        return {"status": "idempotent_duplicate", "invoice": inv}
+
+            tenant = self._data["tenants"].get(tenant_id)
+            if not tenant:
+                raise KeyError(f"Tenant {tenant_id} not found.")
+
+            old_plan = tenant.get("plan", "free")
+            plan_cfg = PLANS.get(plan_name, PLANS["pro"])
+            tenant["plan"] = plan_name
+            tenant["quota_limit"] = plan_cfg["daily_incidents"]
+
+            invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
+            invoice = {
+                "id": invoice_id,
+                "tenant_id": tenant_id,
+                "tenant_name": tenant.get("name"),
+                "plan": plan_name,
+                "amount": amount,
+                "currency": currency.upper(),
+                "gateway": gateway,
+                "order_id": order_id,
+                "payment_id": payment_id,
+                "idempotency_key": idempotency_key or f"{gateway}_{order_id}_{payment_id}",
+                "status": "paid",
+                "date": datetime.now(timezone.utc).isoformat(),
+            }
+            self._data["invoices"].append(invoice)
+            self._record_audit_locked(
+                "payment_success",
+                f"Payment verified via {gateway.upper()} ({payment_id}): Tenant {tenant['name']} upgraded from {old_plan} to {plan_name} ({currency.upper()} {amount})",
+            )
+            self._save()
+            return {"tenant": tenant, "invoice": invoice, "plan_info": plan_cfg}
+
+    def refund_payment(self, invoice_id: str, reason: str = "") -> dict[str, Any]:
+        with self._lock:
+            invoice = next((inv for inv in self._data["invoices"] if inv.get("id") == invoice_id), None)
+            if not invoice:
+                raise KeyError(f"Invoice {invoice_id} not found.")
+
+            if invoice.get("status") == "refunded":
+                return {"status": "already_refunded", "invoice": invoice}
+
+            invoice["status"] = "refunded"
+            invoice["refund_reason"] = reason or "Customer requested refund"
+            invoice["refunded_at"] = datetime.now(timezone.utc).isoformat()
+
+            tenant_id = invoice.get("tenant_id")
+            tenant = self._data["tenants"].get(tenant_id)
+            if tenant:
+                tenant["plan"] = "free"
+                tenant["quota_limit"] = PLANS["free"]["daily_incidents"]
+                self._record_audit_locked(
+                    "payment_refunded",
+                    f"Refund processed for invoice {invoice_id} ({invoice.get('gateway')} {invoice.get('payment_id')}). Workspace downgraded to Free.",
+                )
+
+            self._save()
+            return {"status": "refunded", "invoice": invoice, "tenant": tenant}
+
+    def record_failed_payment(
+        self,
+        tenant_id: str,
+        plan_name: str,
+        amount: float,
+        currency: str,
+        gateway: str,
+        order_id: str,
+        error_msg: str,
+    ) -> dict[str, Any]:
+        with self._lock:
+            tenant = self._data["tenants"].get(tenant_id) or {}
+            invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
+            invoice = {
+                "id": invoice_id,
+                "tenant_id": tenant_id,
+                "tenant_name": tenant.get("name", "Unknown"),
+                "plan": plan_name,
+                "amount": amount,
+                "currency": currency.upper(),
+                "gateway": gateway,
+                "order_id": order_id,
+                "payment_id": "failed",
+                "status": "failed",
+                "error": error_msg,
+                "date": datetime.now(timezone.utc).isoformat(),
+            }
+            self._data["invoices"].append(invoice)
+            self._record_audit_locked(
+                "payment_failed",
+                f"Payment failed via {gateway.upper()} for tenant {tenant_id}: {error_msg}",
+            )
+            self._save()
+            return invoice
+
     def set_tenant_status(self, tenant_id: str, status: str) -> dict[str, Any]:
         with self._lock:
             tenant = self._data["tenants"].get(tenant_id)
