@@ -1,27 +1,26 @@
 services:
-  # ── 1. ShadowFix AI Core Service ──
-  shadowfix:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: shadowfix-app
+  # ── 1. PostgreSQL Production Database ──
+  postgres:
+    image: postgres:16-alpine
+    container_name: shadowfix-postgres
     restart: always
     environment:
-      - SHADOWFIX_ENV=production
-      - REDIS_URL=redis://shadowfix-redis:6379/0
-      - QDRANT_MODE=disk
-    env_file:
-      - .env
+      POSTGRES_DB: ${POSTGRES_DB:-shadowfix_prod}
+      POSTGRES_USER: ${POSTGRES_USER:-shadowfix}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shadowfix_secure_pass_2026}
     volumes:
-      - shadowfix_data:/app/backend/data
-    depends_on:
-      - redis
+      - postgres_data:/var/lib/postgresql/data
     ports:
-      - "8000:8000"
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shadowfix} -d ${POSTGRES_DB:-shadowfix_prod}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - shadowfix-net
 
-  # ── 2. Redis Cache & Job Queue ──
+  # ── 2. Redis Cache & Distributed Queue ──
   redis:
     image: redis:7-alpine
     container_name: shadowfix-redis
@@ -34,7 +33,7 @@ services:
     networks:
       - shadowfix-net
 
-  # ── 3. Qdrant Vector Database ──
+  # ── 3. Qdrant Vector Database (AST & Symbol Memory) ──
   qdrant:
     image: qdrant/qdrant:latest
     container_name: shadowfix-qdrant
@@ -46,7 +45,33 @@ services:
     networks:
       - shadowfix-net
 
-  # ── 4. Nginx Reverse Proxy & Load Balancer ──
+  # ── 4. ShadowFix AI Core Service (Multi-Worker Backend + Built Dashboard) ──
+  shadowfix:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shadowfix-app
+    restart: always
+    environment:
+      - SHADOWFIX_ENV=production
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-shadowfix}:${POSTGRES_PASSWORD:-shadowfix_secure_pass_2026}@shadowfix-postgres:5432/${POSTGRES_DB:-shadowfix_prod}
+      - REDIS_URL=redis://shadowfix-redis:6379/0
+      - QDRANT_MODE=disk
+    env_file:
+      - .env
+    volumes:
+      - shadowfix_data:/app/backend/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+    networks:
+      - shadowfix-net
+
+  # ── 5. Nginx Reverse Proxy, SSL & Rate Limiting ──
   nginx:
     image: nginx:alpine
     container_name: shadowfix-nginx
@@ -62,7 +87,7 @@ services:
     networks:
       - shadowfix-net
 
-  # ── 5. Optional Extra: n8n Workflow Automation ──
+  # ── 6. Optional: n8n Workflow Automation ──
   # To run with n8n: docker compose --profile extra -f docker-compose.prod.yml up -d
   n8n:
     image: docker.n8n.io/n8nio/n8n:latest
@@ -84,9 +109,10 @@ services:
       - shadowfix-net
 
 volumes:
-  shadowfix_data:
+  postgres_data:
   redis_data:
   qdrant_data:
+  shadowfix_data:
   certbot_certs:
   n8n_data:
 

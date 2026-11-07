@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Redis & Distributed Caching / Queues
     redis_url: str = ""
 
+    # PostgreSQL Production Database URL
+    database_url: str = ""
+
     # Figma Visual Testing & Design Tokens
     figma_access_token: str = ""
 

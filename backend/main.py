@@ -49,6 +49,7 @@ from pipeline import IncidentStore, index_demo, run_incident
 from project_importer import import_and_index_repository
 
 from saas_db import PLANS, saas_store
+from db.database import db_manager
 
 from services.payment_service import payment_service
 from services.redis_service import redis_service
@@ -280,6 +281,7 @@ def health() -> dict:
         "eval_threshold": app.state.settings.eval_threshold,
         "saas_active": True,
         "redis": redis_service.health_check(),
+        "database": db_manager.health_check(),
     }
 
 @app.get("/api/health/live")
