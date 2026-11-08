@@ -13,6 +13,13 @@ import {
 import { ADMIN_KEY_STORAGE, useAuth } from "../auth";
 import MonacoDiffViewer from "../components/MonacoDiffViewer";
 
+function getRenewalWhatsAppUrl(tenant) {
+  const name = tenant.owner_name || tenant.name || "Customer";
+  const plan = (tenant.plan || "PRO").toUpperCase();
+  const text = `Hi ${name}! Hope you are finding ShadowFix AI helpful for your repositories. Your ShadowFix ${plan} Plan subscription is due for monthly renewal. You can renew seamlessly via this link: https://razorpay.me/@shivamkumar98. Let me know once done so your high-speed AI pipeline stays active. Thank you!`;
+  return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+}
+
 const TABS = [
   "Master KPI",
   "User Admins & Workspaces",
@@ -387,6 +394,15 @@ export default function SuperAdminConsole() {
                       >
                         {t.status === "active" ? "Suspend" : "Activate"}
                       </button>
+                      <a
+                        href={getRenewalWhatsAppUrl(t)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="ml-2 inline-block rounded-full bg-mint/15 px-3 py-1 text-xs font-semibold text-mint hover:bg-mint/25 transition"
+                        title="Send 1-Click WhatsApp Renewal Message"
+                      >
+                        WhatsApp Renewal
+                      </a>
                     </td>
                   </tr>
                 ))}

@@ -417,6 +417,12 @@ class SaaSStore:
             plan_cfg = PLANS[new_plan]
             tenant["plan"] = new_plan
             tenant["quota_limit"] = plan_cfg["daily_incidents"]
+            now = datetime.now(timezone.utc)
+            tenant["subscription_started_at"] = now.isoformat()
+            if new_plan != "free":
+                tenant["subscription_expires_at"] = (now + timedelta(days=30)).isoformat()
+            else:
+                tenant["subscription_expires_at"] = None
 
             invoice_id = f"inv_{uuid.uuid4().hex[:8]}"
             invoice = {
