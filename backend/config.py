@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = ""
     gemini_flash_model: str = "gemini-3.8-flash"
     gemini_pro_model: str = "gemini-3.8-flash"
+    anthropic_api_key: str = ""
+    openai_api_key: str = ""
     qdrant_mode: str = "disk"
     qdrant_url: str = ""
     qdrant_api_key: str = ""
