@@ -87,11 +87,25 @@ def _smart_user_patch(original: str, stack: str, path: str) -> str:
     if " / (1-discount)" in original:
         return original.replace(" / (1-discount)", " * (1-discount)")
 
-    # If no deterministic template matches and Gemini AI is not configured,
-    # reject rather than injecting fake comments or dummy pass statements
+    # Smart SSRF and unhandled requests.get hardening template
+    if "requests.get(url)" in original and "requests" in original:
+        ssrf_guard = (
+            "    # SSRF & Timeout Protection (Hardened by ShadowFix AI)\n"
+            "    from urllib.parse import urlparse\n"
+            "    _parsed = urlparse(url)\n"
+            "    if _parsed.scheme not in ('http', 'https'):\n"
+            "        raise ValueError('Invalid protocol: Only HTTP/HTTPS permitted')\n"
+            "    _host = (_parsed.hostname or '').lower()\n"
+            "    if _host in ('localhost', '127.0.0.1', '169.254.169.254', '0.0.0.0') or _host.startswith('10.') or _host.startswith('192.168.'):\n"
+            "        raise ValueError('Forbidden: Access to private/cloud metadata networks blocked')\n"
+            "    response = requests.get(url, timeout=15)"
+        )
+        return original.replace("    response = requests.get(url)", ssrf_guard, 1)
+
+    # If no deterministic template matches and LLM AI is not configured
     raise ValueError(
         "Automated repair for this codebase requires an intelligent AI model. "
-        "Please configure GEMINI_API_KEY to enable Gemini Pro AST patch generation."
+        "Please configure an LLM key (ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY) in .env to enable AI patch generation."
     )
 
 
