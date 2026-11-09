@@ -1178,3 +1178,23 @@ def fix_figma_ui_bugs(body: FigmaFixRequest, request: Request) -> dict:
         return {"status": "ok", **res}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to apply Figma UI fixes: {exc}") from exc
+
+
+# ── Single-Port Fullstack SPA Static Server ──
+from paths import REPO_ROOT
+from starlette.staticfiles import StaticFiles
+from starlette.responses import FileResponse
+
+_dist_dir = REPO_ROOT / "frontend" / "dist"
+if _dist_dir.exists() and (_dist_dir / "index.html").exists():
+    if (_dist_dir / "assets").exists():
+        app.mount("/assets", StaticFiles(directory=str(_dist_dir / "assets")), name="static_assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_spa(full_path: str):
+        if full_path.startswith("api/") or full_path.startswith("ws/"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        target_file = _dist_dir / full_path
+        if target_file.is_file():
+            return FileResponse(target_file)
+        return FileResponse(_dist_dir / "index.html")
