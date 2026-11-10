@@ -16,12 +16,10 @@ import { AgentsPage, FaqPage, SecurityPage } from "./pages/SitePages";
 
 // Main navigation items
 const NAV = [
-  { to: "/agents", label: "Agents" },
+  { to: "/", label: "Home" },
   { to: "/testing", label: "Figma & Chaos" },
-  { to: "/security", label: "Security" },
   { to: "/demo", label: "Live demo" },
   { to: "/pricing", label: "Pricing" },
-  { to: "/faq", label: "FAQ" },
 ];
 
 function ScrollToTop() {
@@ -207,7 +205,7 @@ function Header() {
 
         <nav className="hidden items-center gap-1 md:flex" aria-label="Main">
           {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} className={link}>
+            <NavLink key={item.to} to={item.to} end={item.to === "/"} className={link}>
               {item.label}
             </NavLink>
           ))}
@@ -270,7 +268,7 @@ function Header() {
         <nav id="mobile-nav" className="border-t border-line px-6 py-4 md:hidden" aria-label="Mobile">
           <div className="flex flex-col gap-1">
             {NAV.map((item) => (
-              <NavLink key={item.to} to={item.to} className={link}>
+              <NavLink key={item.to} to={item.to} end={item.to === "/"} className={link}>
                 {item.label}
               </NavLink>
             ))}
