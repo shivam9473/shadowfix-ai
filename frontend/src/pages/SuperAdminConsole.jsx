@@ -16,7 +16,11 @@ import MonacoDiffViewer from "../components/MonacoDiffViewer";
 function getRenewalWhatsAppUrl(tenant) {
   const name = tenant.owner_name || tenant.name || "Customer";
   const plan = (tenant.plan || "PRO").toUpperCase();
+  const phone = (tenant.owner_phone || tenant.phone || "").replace(/[^0-9]/g, "");
   const text = `Hi ${name}! Hope you are finding ShadowFix AI helpful for your repositories. Your ShadowFix ${plan} Plan subscription is due for monthly renewal. You can renew seamlessly via this link: https://razorpay.me/@shivamkumar98. Let me know once done so your high-speed AI pipeline stays active. Thank you!`;
+  if (phone) {
+    return `https://api.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(text)}`;
+  }
   return `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
 }
 
@@ -104,6 +108,22 @@ export default function SuperAdminConsole() {
       setTimeout(() => setMessage(""), 3000);
     } catch (err) {
       setError(err.message);
+    }
+  }
+
+    async function handleSendEmail(tenantId) {
+    try {
+      setBusy(true);
+      const res = await adminFetch(`/api/superadmin/tenants/${tenantId}/send-email`, adminKey, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      setMessage(res.status === "sent" ? `Email dispatched via Resend to ${res.to}!` : (res.message || "Email queued!"));
+      setTimeout(() => setMessage(""), 5000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -352,6 +372,9 @@ export default function SuperAdminConsole() {
                     <td className="px-5 py-4">
                       <p className="font-semibold text-paper">{t.owner_name}</p>
                       <p className="font-mono text-[11px] text-mute">{t.owner_email}</p>
+                      {t.owner_phone && (
+                        <p className="font-mono text-[11px] text-mint">📱 {t.owner_phone}</p>
+                      )}
                     </td>
                     <td className="px-5 py-4 font-mono font-bold text-mint">
                       {t.projects_count} repo{t.projects_count === 1 ? "" : "s"}
@@ -401,8 +424,16 @@ export default function SuperAdminConsole() {
                         className="ml-2 inline-block rounded-full bg-mint/15 px-3 py-1 text-xs font-semibold text-mint hover:bg-mint/25 transition"
                         title="Send 1-Click WhatsApp Renewal Message"
                       >
-                        WhatsApp Renewal
+                        WhatsApp
                       </a>
+                      <button
+                        type="button"
+                        onClick={() => handleSendEmail(t.id)}
+                        className="ml-1.5 rounded-full bg-brand/15 px-3 py-1 text-xs font-semibold text-paper hover:bg-brand/30 transition"
+                        title="Send Official Renewal Email via Resend"
+                      >
+                        Email
+                      </button>
                     </td>
                   </tr>
                 ))}

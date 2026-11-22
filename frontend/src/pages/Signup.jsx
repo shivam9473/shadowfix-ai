@@ -19,7 +19,7 @@ const LEVELS = ["Too short", "Weak", "Okay", "Good", "Strong"];
 export default function Signup() {
   const { user, signUp } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [form, setForm] = useState({ name: "", email: "", password: "", phone: "" });
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -85,6 +85,17 @@ export default function Signup() {
             placeholder="you@company.com"
             aria-invalid={errors.email ? true : undefined}
             aria-describedby={errors.email ? "email-error" : undefined}
+            className={inputClass}
+          />
+        </Field>
+                <Field label="Phone / WhatsApp Number" id="phone" hint="For urgent bug alerts & WhatsApp billing reminders">
+          <input
+            id="phone"
+            type="tel"
+            autoComplete="tel"
+            value={form.phone}
+            onChange={set("phone")}
+            placeholder="+91 98765 43210"
             className={inputClass}
           />
         </Field>

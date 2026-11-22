@@ -185,6 +185,7 @@ class RegisterRequest(BaseModel):
     name: str = Field(min_length=2, max_length=60)
     email: str = Field(min_length=5, max_length=120)
     password: str = Field(min_length=6)
+    phone: str = ""
     organization_name: str | None = None
 
 class LoginRequest(BaseModel):
@@ -322,6 +323,7 @@ def register(body: RegisterRequest) -> dict:
             email=body.email,
             password=body.password,
             organization_name=body.organization_name,
+            phone=body.phone,
         )
         auth_data = saas_store.authenticate_user(body.email, body.password)
         return {"status": "ok", "user": auth_data}
@@ -839,6 +841,62 @@ def superadmin_tenants(request: Request) -> dict:
 
     _admin_guard(request)
     return {"tenants": saas_store.list_all_tenants()}
+
+
+
+class SendEmailRequest(BaseModel):
+    subject: str = "ShadowFix AI Subscription & Renewal Update"
+    message: str = ""
+
+@app.post("/api/superadmin/tenants/{tenant_id}/send-email")
+async def superadmin_send_email(tenant_id: str, body: SendEmailRequest, request: Request) -> dict:
+    _admin_guard(request)
+    tenant = saas_store.get_tenant(tenant_id)
+    if not tenant:
+        raise HTTPException(status_code=404, detail="Tenant not found")
+
+    to_email = None
+    for u in saas_store._data["users"].values():
+        if u.get("tenant_id") == tenant_id:
+            to_email = u.get("email")
+            break
+    if not to_email:
+        raise HTTPException(status_code=400, detail="Tenant owner email not found")
+
+    resend_key = os.getenv("RESEND_API_KEY") or getattr(request.app.state.settings, "resend_api_key", "")
+    if not resend_key:
+        return {
+            "status": "simulated",
+            "message": f"Email queued (simulation mode: set RESEND_API_KEY in .env to dispatch live). Target: {to_email}",
+            "to": to_email
+        }
+
+    try:
+        import httpx
+        content = body.message or (
+            f"Hi {tenant.get('name', 'Customer')},<br><br>"
+            f"Your ShadowFix AI {tenant.get('plan', 'PRO').upper()} plan is active. "
+            f"For renewal or upgrades, please complete your payment via Razorpay: "
+            f"<a href='https://razorpay.me/@shivamkumar98'>https://razorpay.me/@shivamkumar98</a>.<br><br>"
+            f"Thank you,<br>ShadowFix AI Team"
+        )
+        payload = {
+            "from": "ShadowFix AI <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": body.subject,
+            "html": content
+        }
+        headers = {
+            "Authorization": f"Bearer {resend_key}",
+            "Content-Type": "application/json"
+        }
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post("https://api.resend.com/emails", json=payload, headers=headers)
+            if resp.status_code in (200, 201):
+                return {"status": "sent", "resend_id": resp.json().get("id"), "to": to_email}
+            return {"status": "error", "detail": resp.text, "to": to_email}
+    except Exception as exc:
+        return {"status": "error", "detail": str(exc), "to": to_email}
 
 @app.post("/api/superadmin/tenants/{tenant_id}/plan")
 

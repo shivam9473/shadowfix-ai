@@ -42,7 +42,7 @@ export function AuthProvider({ children }) {
       .catch(() => {});
   }, [token]);
 
-  const signUp = useCallback(async ({ name, email, password, organizationName }) => {
+  const signUp = useCallback(async ({ name, email, password, organizationName, phone }) => {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -51,6 +51,7 @@ export function AuthProvider({ children }) {
         email: email.trim().toLowerCase(),
         password,
         organization_name: organizationName || undefined,
+        phone: (phone || "").trim(),
       }),
     });
     const data = await res.json();

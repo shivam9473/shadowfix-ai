@@ -235,7 +235,7 @@ class SaaSStore:
             self._save()
 
     # ── User Operations ──
-    def register_user(self, name: str, email: str, password: str, organization_name: str | None = None) -> dict[str, Any]:
+    def register_user(self, name: str, email: str, password: str, organization_name: str | None = None, phone: str | None = None) -> dict[str, Any]:
         with self._lock:
             email_clean = email.strip().lower()
             for u in self._data["users"].values():
@@ -255,6 +255,7 @@ class SaaSStore:
                 "status": "active",
                 "quota_used_today": 0,
                 "quota_limit": PLANS["free"]["daily_incidents"],
+                "phone": (phone or "").strip(),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
             self._data["tenants"][tenant_id] = tenant
@@ -267,6 +268,7 @@ class SaaSStore:
                 "role": "user_admin",
                 "tenant_id": tenant_id,
                 "salt": salt,
+                "phone": (phone or "").strip(),
                 "hash": _hash_password(password, salt),
                 "created_at": datetime.now(timezone.utc).isoformat(),
             }
@@ -400,6 +402,7 @@ class SaaSStore:
                     **t,
                     "owner_name": owner.get("name", "Unknown"),
                     "owner_email": owner.get("email", "Unknown"),
+                    "owner_phone": owner.get("phone") or t.get("phone", ""),
                     "projects_count": projects_count,
                     "plan_info": PLANS.get(t.get("plan", "free"), PLANS["free"]),
                 })
