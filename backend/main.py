@@ -921,6 +921,7 @@ async def superadmin_send_email(tenant_id: str, body: SendEmailRequest, request:
 
 class SendSmsRequest(BaseModel):
     message: str = ""
+    phone: str = ""
 
 @app.post("/api/superadmin/tenants/{tenant_id}/send-sms")
 async def superadmin_send_sms(tenant_id: str, body: SendSmsRequest, request: Request) -> dict:
@@ -929,15 +930,20 @@ async def superadmin_send_sms(tenant_id: str, body: SendSmsRequest, request: Req
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant not found")
 
-    target_phone = tenant.get("phone") or ""
+    target_phone = (body.phone or tenant.get("phone") or "").strip()
     if not target_phone:
         for u in saas_store._data["users"].values():
             if u.get("tenant_id") == tenant_id and u.get("phone"):
-                target_phone = u.get("phone")
+                target_phone = u.get("phone").strip()
                 break
 
     if not target_phone:
-        raise HTTPException(status_code=400, detail="Client phone number not registered for this tenant. Ask client to update phone in Signup/Profile.")
+        raise HTTPException(status_code=400, detail="Client phone number not found. Please provide a phone number.")
+    
+    # Save phone on tenant for future 1-click dispatches
+    tenant["phone"] = target_phone
+    saas_store._data["tenants"][tenant_id]["phone"] = target_phone
+    saas_store._save()
 
     import re
     clean_digits = re.sub(r"[^\d]", "", target_phone)

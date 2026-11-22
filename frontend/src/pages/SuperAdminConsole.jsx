@@ -111,18 +111,27 @@ export default function SuperAdminConsole() {
     }
   }
 
-      async function handleSendSms(tenantId) {
+      async function handleSendSms(tenant) {
+    let targetPhone = tenant.owner_phone || tenant.phone || "";
+    if (!targetPhone) {
+      targetPhone = window.prompt(`Enter phone / WhatsApp number for ${tenant.name || "Customer"}:`, "+91");
+      if (!targetPhone || targetPhone.trim() === "+91" || !targetPhone.trim()) {
+        return;
+      }
+    }
+
     try {
       setBusy(true);
       setMessage("");
       setError("");
-      const res = await adminFetch(`/api/superadmin/tenants/${tenantId}/send-sms`, adminKey, {
+      const res = await adminFetch(`/api/superadmin/tenants/${tenant.id}/send-sms`, adminKey, {
         method: "POST",
-        body: JSON.stringify({}),
+        body: JSON.stringify({ phone: targetPhone.trim() }),
       });
       if (res.status === "sent") {
         setMessage(`✓ SMS sent to ${res.to}! (${res.gateway || "Carrier"})`);
         setError("");
+        loadAll(adminKey);
       } else {
         setError(res.detail || res.message || "Failed to dispatch SMS.");
       }
@@ -466,7 +475,7 @@ export default function SuperAdminConsole() {
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleSendSms(t.id)}
+                        onClick={() => handleSendSms(t)}
                         className="ml-1.5 rounded-full bg-heat/15 px-3 py-1 text-xs font-semibold text-heat hover:bg-heat/30 transition"
                         title="Send Direct Phone Number SMS"
                       >
