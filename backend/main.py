@@ -894,7 +894,27 @@ async def superadmin_send_email(tenant_id: str, body: SendEmailRequest, request:
             resp = client.post("https://api.resend.com/emails", json=payload, headers=headers)
             if resp.status_code in (200, 201):
                 return {"status": "sent", "resend_id": resp.json().get("id"), "to": to_email}
-            return {"status": "error", "detail": resp.text, "to": to_email}
+            
+            # Smart Sandbox handling: Resend free tier only delivers to registered owner without custom domain
+            if resp.status_code == 403 and "testing emails" in resp.text:
+                owner_test_email = "shivamk38812@gmail.com"
+                fallback_payload = {
+                    "from": "ShadowFix AI <onboarding@resend.dev>",
+                    "to": [owner_test_email],
+                    "subject": f"[Test for {to_email}] {body.subject}",
+                    "html": f"<div style='background:#1e1e2e;color:#a6adc8;padding:12px;border-radius:8px;font-family:sans-serif;margin-bottom:16px;'><p style='margin:0 0 6px 0;color:#f38ba8;'><b>⚠️ Resend Sandbox Mode Notice:</b></p><p style='margin:0;'>Delivered to account owner (<code>{owner_test_email}</code>) because sending to external domain (<code>{to_email}</code>) requires a verified domain at <a style='color:#89b4fa;' href='https://resend.com/domains'>resend.com/domains</a>.</p></div>" + content
+                }
+                resp_fallback = client.post("https://api.resend.com/emails", json=fallback_payload, headers=headers)
+                if resp_fallback.status_code in (200, 201):
+                    return {
+                        "status": "sent",
+                        "resend_id": resp_fallback.json().get("id"),
+                        "to": f"{owner_test_email} (Sandbox demo for {to_email})"
+                    }
+
+            err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+            err_msg = err_data.get("message") or resp.text
+            return {"status": "error", "detail": err_msg, "to": to_email}
     except Exception as exc:
         return {"status": "error", "detail": str(exc), "to": to_email}
 

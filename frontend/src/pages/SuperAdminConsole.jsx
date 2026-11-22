@@ -114,12 +114,19 @@ export default function SuperAdminConsole() {
     async function handleSendEmail(tenantId) {
     try {
       setBusy(true);
+      setMessage("");
+      setError("");
       const res = await adminFetch(`/api/superadmin/tenants/${tenantId}/send-email`, adminKey, {
         method: "POST",
         body: JSON.stringify({}),
       });
-      setMessage(res.status === "sent" ? `Email dispatched via Resend to ${res.to}!` : (res.message || "Email queued!"));
-      setTimeout(() => setMessage(""), 5000);
+      if (res.status === "sent") {
+        setMessage(`✓ Email sent via Resend to ${res.to}!`);
+        setError("");
+      } else {
+        setError(res.detail || res.message || "Email failed to send");
+      }
+      setTimeout(() => { setMessage(""); setError(""); }, 8000);
     } catch (err) {
       setError(err.message);
     } finally {
