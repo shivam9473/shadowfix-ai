@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     shadowfix_deploy_bucket: str = ""
     resend_webhook_secret: str = ""
     resend_api_key: str = ""
+    fast2sms_api_key: str = ""
     temporal_address: str = ""
     temporal_namespace: str = "default"
     temporal_task_queue: str = "shadowfix"

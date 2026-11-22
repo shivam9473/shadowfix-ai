@@ -111,7 +111,30 @@ export default function SuperAdminConsole() {
     }
   }
 
-    async function handleSendEmail(tenantId) {
+      async function handleSendSms(tenantId) {
+    try {
+      setBusy(true);
+      setMessage("");
+      setError("");
+      const res = await adminFetch(`/api/superadmin/tenants/${tenantId}/send-sms`, adminKey, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      if (res.status === "sent") {
+        setMessage(`✓ SMS sent to ${res.to}! (${res.gateway || "Carrier"})`);
+        setError("");
+      } else {
+        setError(res.detail || res.message || "Failed to dispatch SMS.");
+      }
+      setTimeout(() => { setMessage(""); setError(""); }, 8000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSendEmail(tenantId) {
     try {
       setBusy(true);
       setMessage("");
@@ -440,6 +463,14 @@ export default function SuperAdminConsole() {
                         title="Send Official Renewal Email via Resend"
                       >
                         Email
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleSendSms(t.id)}
+                        className="ml-1.5 rounded-full bg-heat/15 px-3 py-1 text-xs font-semibold text-heat hover:bg-heat/30 transition"
+                        title="Send Direct Phone Number SMS"
+                      >
+                        SMS
                       </button>
                     </td>
                   </tr>
