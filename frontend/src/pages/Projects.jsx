@@ -20,6 +20,7 @@ export default function Projects() {
   const [tracebackInput, setTracebackInput] = useState("");
   const [testPayload, setTestPayload] = useState("");
   const [runningFix, setRunningFix] = useState(false);
+  const [selectedFixModel, setSelectedFixModel] = useState("claude-3-5-sonnet");
 
   // Bug Audit Drawer/Modal State
   const [auditModalProj, setAuditModalProj] = useState(null);
@@ -118,6 +119,7 @@ export default function Projects() {
         line_number: bug.line_number,
         stack_trace: bug.stack_trace,
         title: bug.title,
+        model: selectedFixModel,
       });
       setAuditModalProj(null);
       navigate(`/incident/${incident.id}`);
@@ -149,6 +151,7 @@ export default function Projects() {
         target_url: probeUrl.trim(),
         traceback: tracebackInput.trim(),
         test_payload: testPayload.trim(),
+        model: selectedFixModel,
       };
       const incident = await runProjectIncident(activeProjForFix.id, runConfig);
       setActiveProjForFix(null);
@@ -414,6 +417,46 @@ export default function Projects() {
                 </div>
               )}
 
+              {/* ── Cursor-Style AI Model Selector ── */}
+              <div className="rounded-xl border border-line bg-ink/70 p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-paper">
+                    <span>✨</span>
+                    <span>AI Model (Cursor Mode)</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand/20 text-mint font-semibold">
+                    {selectedFixModel.includes("claude") ? "Anthropic" : (selectedFixModel.includes("gpt") || selectedFixModel.includes("o1") ? "OpenAI" : "Google / Auto")}
+                  </span>
+                </div>
+                <select
+                  value={selectedFixModel}
+                  onChange={(e) => setSelectedFixModel(e.target.value)}
+                  className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-xs font-mono text-paper focus:border-brand focus:outline-none"
+                >
+                  <optgroup label="Anthropic Claude (Smartest / Cursor Flagship)">
+                    <option value="claude-3-5-sonnet">🟣 Claude 3.5 Sonnet (Default / Best Coding)</option>
+                    <option value="claude-3-5-haiku">🟣 Claude 3.5 Haiku (Lightning Fast)</option>
+                    <option value="claude-3-opus">🟣 Claude 3 Opus (Deep Reasoning)</option>
+                  </optgroup>
+                  <optgroup label="OpenAI GPT (Flagship & Reasoning)">
+                    <option value="gpt-4o">🟢 GPT-4o (Omni Flagship)</option>
+                    <option value="gpt-4o-mini">🟢 GPT-4o Mini (Fast & Efficient)</option>
+                    <option value="o1-mini">🟢 o1 Mini (Complex Reasoning)</option>
+                  </optgroup>
+                  <optgroup label="Google Gemini & Cloud">
+                    <option value="gemini-2.5-pro">🔵 Gemini 2.5 Pro (Deep Context)</option>
+                    <option value="gemini-flash">🔵 Gemini 3.8 Flash</option>
+                    <option value="aws-bedrock-claude-3-5">☁️ Claude 3.5 on AWS Bedrock</option>
+                  </optgroup>
+                  <optgroup label="Auto">
+                    <option value="auto">⚡ Auto (ShadowFix Multi-Model Fallback)</option>
+                  </optgroup>
+                </select>
+                <p className="mt-1.5 text-[10px] text-mute font-mono">
+                  Select your preferred AI engine just like Cursor. Uses your provisioned Anthropic or OpenAI API key.
+                </p>
+              </div>
+
               <div className="mt-6 flex justify-end gap-3 pt-4 border-t border-line">
                 <button
                   type="button"
@@ -526,6 +569,46 @@ export default function Projects() {
                 />
                 <p className="mt-1 text-[11px] text-mute">
                   The endpoint where your app runs on your machine or cloud.
+                </p>
+              </div>
+
+              {/* ── Cursor-Style AI Model Selector ── */}
+              <div className="rounded-xl border border-line bg-ink/70 p-3.5">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-paper">
+                    <span>✨</span>
+                    <span>AI Model (Cursor Mode)</span>
+                  </div>
+                  <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-brand/20 text-mint font-semibold">
+                    {selectedFixModel.includes("claude") ? "Anthropic" : (selectedFixModel.includes("gpt") || selectedFixModel.includes("o1") ? "OpenAI" : "Google / Auto")}
+                  </span>
+                </div>
+                <select
+                  value={selectedFixModel}
+                  onChange={(e) => setSelectedFixModel(e.target.value)}
+                  className="w-full rounded-xl border border-line bg-panel px-3 py-2 text-xs font-mono text-paper focus:border-brand focus:outline-none"
+                >
+                  <optgroup label="Anthropic Claude (Smartest / Cursor Flagship)">
+                    <option value="claude-3-5-sonnet">🟣 Claude 3.5 Sonnet (Default / Best Coding)</option>
+                    <option value="claude-3-5-haiku">🟣 Claude 3.5 Haiku (Lightning Fast)</option>
+                    <option value="claude-3-opus">🟣 Claude 3 Opus (Deep Reasoning)</option>
+                  </optgroup>
+                  <optgroup label="OpenAI GPT (Flagship & Reasoning)">
+                    <option value="gpt-4o">🟢 GPT-4o (Omni Flagship)</option>
+                    <option value="gpt-4o-mini">🟢 GPT-4o Mini (Fast & Efficient)</option>
+                    <option value="o1-mini">🟢 o1 Mini (Complex Reasoning)</option>
+                  </optgroup>
+                  <optgroup label="Google Gemini & Cloud">
+                    <option value="gemini-2.5-pro">🔵 Gemini 2.5 Pro (Deep Context)</option>
+                    <option value="gemini-flash">🔵 Gemini 3.8 Flash</option>
+                    <option value="aws-bedrock-claude-3-5">☁️ Claude 3.5 on AWS Bedrock</option>
+                  </optgroup>
+                  <optgroup label="Auto">
+                    <option value="auto">⚡ Auto (ShadowFix Multi-Model Fallback)</option>
+                  </optgroup>
+                </select>
+                <p className="mt-1.5 text-[10px] text-mute font-mono">
+                  Select your preferred AI engine just like Cursor. Uses your provisioned Anthropic or OpenAI API key.
                 </p>
               </div>
 

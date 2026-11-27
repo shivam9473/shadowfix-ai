@@ -226,6 +226,26 @@ export async function updateSuperAdminTenantAiConfig(adminKey, tenantId, payload
   });
 }
 
+export async function verifyAiKey(provider, apiKey) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/user/ai-verify-key", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+  return res.json();
+}
+
+export async function adminVerifyAiKey(adminKey, provider, apiKey) {
+  return adminFetch("/api/superadmin/ai-verify-key", adminKey, {
+    method: "POST",
+    body: JSON.stringify({ provider, api_key: apiKey }),
+  });
+}
+
 // ── Payment Gateway APIs (Razorpay & PayPal) ──
 export async function createRazorpayOrder(planId, currency = "INR") {
   const token = localStorage.getItem("shadowfix.token") || "";

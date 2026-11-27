@@ -116,6 +116,7 @@ def run_incident(store: IncidentStore, kb: AstKnowledgeBase, memory: TenantMemor
             "custom_stack": incident.get("custom_stack", ""),
             "mode": incident.get("mode", ""),
             "test_payload": incident.get("test_payload", ""),
+            "selected_model": incident.get("selected_model", ""),
             "attempts": 0,
             "original": "",
         }

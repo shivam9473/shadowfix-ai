@@ -282,6 +282,7 @@ class FixBugRequest(BaseModel):
     line_number: int = 1
     stack_trace: str = ""
     title: str = ""
+    model: str = ""
 
 class ProjectRunRequest(BaseModel):
 
@@ -289,6 +290,11 @@ class ProjectRunRequest(BaseModel):
     target_url: str = ""
     traceback: str = ""
     test_payload: str = ""
+    model: str = ""
+
+class VerifyKeyRequest(BaseModel):
+    provider: str
+    api_key: str
 
 # ── Health & Readiness Probes ──
 
@@ -493,6 +499,7 @@ async def run_project_incident(project_id: str, request: Request, body: ProjectR
         custom_stack=req_body.traceback,
         mode=req_body.mode,
         test_payload=req_body.test_payload,
+        selected_model=req_body.model,
     )
     asyncio.create_task(_execute(incident["id"]))
     return incident
@@ -556,6 +563,7 @@ async def fix_project_bug(project_id: str, body: FixBugRequest, request: Request
         mode="bug_fix",
         bug_id=body.bug_id,
         bug_title=body.title,
+        selected_model=body.model,
     )
     asyncio.create_task(_execute(incident["id"]))
     return incident
@@ -644,6 +652,20 @@ def update_user_ai_config(body: UserAiConfigRequest, request: Request) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.post("/api/user/ai-verify-key")
+def user_verify_key(body: VerifyKeyRequest, request: Request) -> dict:
+    """Verifies user's custom OpenAI/Anthropic/Gemini API key live, like Cursor."""
+    from llm.router import verify_provider_key
+    _require_user(request)
+    return verify_provider_key(body.provider, body.api_key)
+
+@app.post("/api/superadmin/ai-verify-key")
+def superadmin_verify_key(body: VerifyKeyRequest, request: Request) -> dict:
+    """Verifies provider API key directly for SuperAdmin."""
+    from llm.router import verify_provider_key
+    _admin_guard(request)
+    return verify_provider_key(body.provider, body.api_key)
 
 @app.post("/api/billing/webhook/stripe")
 

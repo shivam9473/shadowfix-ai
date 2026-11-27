@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth";
-import { fetchUserAiConfig, updateUserAiConfig } from "../api";
+import { fetchUserAiConfig, updateUserAiConfig, verifyAiKey } from "../api";
 
 function formatDate(iso) {
   if (!iso) return "N/A";
@@ -32,6 +32,22 @@ export default function Profile() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiSaved, setAiSaved] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [verifyingKey, setVerifyingKey] = useState(false);
+  const [verifyResult, setVerifyResult] = useState(null);
+
+  async function handleVerifyKey() {
+    if (!aiKeyInput.trim()) return;
+    setVerifyingKey(true);
+    setVerifyResult(null);
+    try {
+      const res = await verifyAiKey(aiProviderInput, aiKeyInput.trim());
+      setVerifyResult(res);
+    } catch (err) {
+      setVerifyResult({ valid: false, error: err.message });
+    } finally {
+      setVerifyingKey(false);
+    }
+  }
 
   async function loadAiConfig() {
     try {
@@ -273,13 +289,33 @@ export default function Profile() {
                     </span>
                   )}
                 </div>
-                <input
-                  type="password"
-                  value={aiKeyInput}
-                  onChange={(e) => setAiKeyInput(e.target.value)}
-                  placeholder={aiConfig.has_custom_key ? `Current key: ${aiConfig.api_key} (leave blank to keep)` : "Paste your own OpenAI / Anthropic / Gemini API key"}
-                  className="w-full rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="password"
+                    value={aiKeyInput}
+                    onChange={(e) => {
+                      setAiKeyInput(e.target.value);
+                      setVerifyResult(null);
+                    }}
+                    placeholder={aiConfig.has_custom_key ? `Current key: ${aiConfig.api_key} (leave blank to keep)` : "Paste your own OpenAI / Anthropic / Gemini API key"}
+                    className="flex-1 rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
+                  />
+                  {aiKeyInput && (
+                    <button
+                      type="button"
+                      onClick={handleVerifyKey}
+                      disabled={verifyingKey}
+                      className="rounded-xl border border-brand/50 px-3.5 py-2 text-xs font-bold text-mint hover:bg-brand/20 transition disabled:opacity-50 flex items-center gap-1 font-mono flex-none"
+                    >
+                      {verifyingKey ? "Verifying..." : "⚡ Verify Key"}
+                    </button>
+                  )}
+                </div>
+                {verifyResult && (
+                  <p className={`mt-1.5 text-[11px] font-mono ${verifyResult.valid ? "text-mint font-semibold" : "text-heat"}`}>
+                    {verifyResult.valid ? `✓ ${verifyResult.message}` : `✕ ${verifyResult.error}`}
+                  </p>
+                )}
                 <p className="mt-1 text-[10px] text-mute font-mono">
                   You can use your own personal API key or use the team key configured by your SuperAdmin.
                 </p>

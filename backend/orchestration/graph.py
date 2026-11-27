@@ -74,6 +74,7 @@ def build_graph(kb: AstKnowledgeBase, memory: TenantMemory):
             original=orig,
             stack=state["breaker"]["stack"],
             project_id=state.get("project_id", ""),
+            selected_model=state.get("selected_model", ""),
         )
         return {"coder": draft, "attempts": state.get("attempts", 0) + 1}
 

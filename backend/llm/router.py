@@ -1,7 +1,7 @@
 """Tenant-Aware Multi-Provider AI Engine for ShadowFix AI.
-Supports per-tenant API keys (Admin-provisioned or User-BYOK),
-OpenAI GPT, Anthropic Claude, Google Gemini, and AWS Bedrock routing,
-with real-time token tracking and quota enforcement.
+Supports Cursor-style model selection (Claude 3.5 Sonnet, GPT-4o, Gemini 2.5 Pro, Bedrock),
+dedicated provider API keys (Anthropic, OpenAI, Google) with live verification,
+real-time token tracking, and quota enforcement.
 """
 
 from __future__ import annotations
@@ -18,13 +18,15 @@ def generate_for_tenant(
     prompt: str,
     role: str = "pro",
     system_instruction: str = "",
+    model_override: str = "",
 ) -> tuple[str | None, str, dict[str, Any]]:
     """Generates AI output using the tenant's configured provider, model, and API key.
 
+    Supports Cursor-style dynamic model overrides.
     Returns:
         (text, model_used, token_stats)
     """
-    from saas_db import SaaSStore, saas_store
+    from saas_db import saas_store
 
     ai_cfg = {}
     plan = "free"
@@ -45,10 +47,15 @@ def generate_for_tenant(
         )
         return None, "quota-exceeded", {"error": "Monthly token quota exceeded"}
 
-    # Provider & Model resolution
+    # Provider & Model resolution (model_override takes precedence like Cursor)
+    active_model = model_override.strip() if model_override else (ai_cfg.get("active_model") or "")
     provider = (ai_cfg.get("provider") or "auto").lower()
-    active_model = ai_cfg.get("active_model") or ""
-    custom_key = ai_cfg.get("api_key") or ""
+    general_key = ai_cfg.get("api_key") or ""
+
+    # Dedicated keys per provider (just like Cursor)
+    anthropic_key = ai_cfg.get("anthropic_api_key") or (general_key if "sk-ant" in general_key else "") or os.getenv("ANTHROPIC_API_KEY", "")
+    openai_key = ai_cfg.get("openai_api_key") or (general_key if general_key.startswith("sk-") and "sk-ant" not in general_key else "") or os.getenv("OPENAI_API_KEY", "")
+    gemini_key = ai_cfg.get("gemini_api_key") or (general_key if "AIza" in general_key else "") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
 
     # Model defaults based on plan and role if not specified
     if not active_model:
@@ -59,35 +66,42 @@ def generate_for_tenant(
         else:
             active_model = "gemini-flash"
 
-    # Attempt generation according to resolved provider
     text = None
     model_used = active_model
     prompt_tokens = 0
     completion_tokens = 0
 
-    # 1. Anthropic Claude (Direct or Cloud)
-    if provider in ("anthropic", "claude") or ("claude" in active_model.lower() and provider != "openai"):
-        key = custom_key or os.getenv("ANTHROPIC_API_KEY", "")
-        if key:
+    # 1. Anthropic Claude (Claude 3.5 Sonnet, Claude 3.5 Haiku, Claude 3 Opus)
+    if "claude" in active_model.lower() or provider in ("anthropic", "claude"):
+        if anthropic_key:
+            target_claude = (
+                "claude-3-5-sonnet-20241022"
+                if "sonnet" in active_model.lower()
+                else ("claude-3-opus-20240229" if "opus" in active_model.lower() else "claude-3-5-haiku-20241022")
+            )
             text, prompt_tokens, completion_tokens = _call_anthropic(
-                key=key,
-                model="claude-3-5-sonnet-20241022" if "sonnet" in active_model else "claude-3-5-haiku-20241022",
+                key=anthropic_key,
+                model=target_claude,
                 prompt=prompt,
                 system_instruction=system_instruction,
             )
-            model_used = "claude-3.5-sonnet" if "sonnet" in active_model else "claude-3.5-haiku"
+            model_used = target_claude
 
-    # 2. OpenAI GPT (GPT-4o / GPT-4o-mini)
-    if not text and (provider in ("openai", "gpt") or "gpt" in active_model.lower()):
-        key = custom_key or os.getenv("OPENAI_API_KEY", "")
-        if key:
+    # 2. OpenAI GPT (GPT-4o, GPT-4o-mini, o1, o1-mini)
+    if not text and ("gpt" in active_model.lower() or "o1" in active_model.lower() or provider in ("openai", "gpt")):
+        if openai_key:
+            target_openai = (
+                "o1-mini"
+                if "o1-mini" in active_model.lower()
+                else ("o1-preview" if "o1" in active_model.lower() else ("gpt-4o" if "4o" in active_model.lower() and "mini" not in active_model.lower() else "gpt-4o-mini"))
+            )
             text, prompt_tokens, completion_tokens = _call_openai(
-                key=key,
-                model="gpt-4o" if "4o" in active_model and "mini" not in active_model else "gpt-4o-mini",
+                key=openai_key,
+                model=target_openai,
                 prompt=prompt,
                 system_instruction=system_instruction,
             )
-            model_used = "gpt-4o" if "4o" in active_model and "mini" not in active_model else "gpt-4o-mini"
+            model_used = target_openai
 
     # 3. AWS Bedrock Claude / Custom Cloud
     if not text and (provider in ("aws_bedrock", "bedrock") or "bedrock" in active_model.lower()):
@@ -103,18 +117,18 @@ def generate_for_tenant(
             )
             model_used = "aws-bedrock-claude-3-5"
 
-    # 4. Google Gemini
+    # 4. Google Gemini (Gemini 2.5 Pro / Gemini Flash)
     if not text and (provider in ("gemini", "google", "auto") or "gemini" in active_model.lower()):
-        key = (custom_key if provider in ("gemini", "google") else "") or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
-        if key:
+        if gemini_key:
+            target_gemini = "gemini-2.5-pro" if "pro" in active_model.lower() or role == "pro" else "gemini-3.8-flash"
             text, prompt_tokens, completion_tokens = _call_gemini(
-                key=key,
-                model="gemini-2.5-pro" if "pro" in active_model.lower() or role == "pro" else "gemini-3.8-flash",
+                key=gemini_key,
+                model=target_gemini,
                 prompt=prompt,
             )
-            model_used = "gemini-2.5-pro" if "pro" in active_model.lower() or role == "pro" else "gemini-flash"
+            model_used = target_gemini
 
-    # 5. Global Fallback pool if custom provider didn't yield text
+    # 5. Global Platform Fallback if key missing or call failed
     if not text:
         from llm.gemini import pro as gemini_pro, flash as gemini_flash
         fallback_fn = gemini_pro if role == "pro" else gemini_flash
@@ -147,6 +161,59 @@ def generate_for_tenant(
             logger.warning("Failed to record token usage for tenant %s: %s", tenant_id, exc)
 
     return text, model_used, token_stats
+
+
+def verify_provider_key(provider: str, api_key: str) -> dict[str, Any]:
+    """Verifies an API key with the provider directly, just like Cursor's Verify button."""
+    p = provider.lower().strip()
+    key = api_key.strip()
+    if not key:
+        return {"valid": False, "error": "API key cannot be empty"}
+
+    try:
+        import httpx
+
+        if p in ("anthropic", "claude"):
+            headers = {
+                "x-api-key": key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            payload = {
+                "model": "claude-3-5-haiku-20241022",
+                "max_tokens": 5,
+                "messages": [{"role": "user", "content": "ping"}],
+            }
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.post("https://api.anthropic.com/v1/messages", headers=headers, json=payload)
+                if resp.status_code == 200:
+                    return {"valid": True, "provider": "Anthropic", "message": "Anthropic API Key verified successfully! (Claude models active)"}
+                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                err_msg = err_data.get("error", {}).get("message") or resp.text
+                return {"valid": False, "provider": "Anthropic", "error": f"Anthropic rejected key (HTTP {resp.status_code}): {err_msg}"}
+
+        elif p in ("openai", "gpt"):
+            headers = {"Authorization": f"Bearer {key}"}
+            with httpx.Client(timeout=10.0) as client:
+                resp = client.get("https://api.openai.com/v1/models", headers=headers)
+                if resp.status_code == 200:
+                    return {"valid": True, "provider": "OpenAI", "message": "OpenAI API Key verified successfully! (GPT-4o & o1 active)"}
+                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                err_msg = err_data.get("error", {}).get("message") or resp.text
+                return {"valid": False, "provider": "OpenAI", "error": f"OpenAI rejected key (HTTP {resp.status_code}): {err_msg}"}
+
+        elif p in ("gemini", "google"):
+            from google import genai
+            client = genai.Client(api_key=key)
+            resp = client.models.generate_content(model="gemini-3.8-flash", contents="ping")
+            if resp and getattr(resp, "text", None):
+                return {"valid": True, "provider": "Google Gemini", "message": "Gemini API Key verified successfully!"}
+            return {"valid": False, "provider": "Google Gemini", "error": "Gemini test call returned empty"}
+
+        else:
+            return {"valid": True, "provider": p, "message": f"{p} key saved"}
+    except Exception as exc:
+        return {"valid": False, "provider": p, "error": str(exc)}
 
 
 def _call_anthropic(
@@ -205,11 +272,14 @@ def _call_openai(
             messages.append({"role": "system", "content": system_instruction})
         messages.append({"role": "user", "content": prompt})
 
-        payload = {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "temperature": 0.2,
         }
+        # o1 models do not support custom temperature
+        if not model.startswith("o1"):
+            payload["temperature"] = 0.2
+
         with httpx.Client(timeout=35.0) as client:
             resp = client.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
             if resp.status_code == 200:
@@ -237,7 +307,6 @@ def _call_gemini(
         client = genai.Client(api_key=key)
         response = client.models.generate_content(model=model, contents=prompt)
         text = getattr(response, "text", None)
-        # Approximate token count for Gemini
         p_tokens = len(prompt) // 4
         c_tokens = len(text or "") // 4
         return text or None, p_tokens, c_tokens
@@ -252,7 +321,6 @@ def _call_aws_bedrock(
     aws_region: str,
     prompt: str,
 ) -> tuple[str | None, int, int]:
-    """Invokes Anthropic Claude 3.5 on AWS Bedrock via boto3 if available."""
     try:
         import json
         import boto3

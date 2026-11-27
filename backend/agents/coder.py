@@ -25,6 +25,7 @@ def run_coder(
     original: str,
     stack: str,
     project_id: str = "",
+    selected_model: str = "",
 ) -> dict:
     model = "deterministic-repair"
     normalized_path = culprit_path.replace("\\", "/")
@@ -43,13 +44,23 @@ def run_coder(
 
     if normalized_path.endswith("demo-shopkart/api/checkout.py") and not project_id:
         patched = _deterministic(original)
-        drafted, model_used, _ = generate_for_tenant(tenant_id, _prompt(original, stack), role="pro")
+        drafted, model_used, _ = generate_for_tenant(
+            tenant_id,
+            _prompt(original, stack),
+            role="pro",
+            model_override=selected_model,
+        )
         if drafted and _accept_model_file(drafted):
             patched = _strip_fence(drafted)
             model = model_used
     else:
         # User-imported project repair
-        drafted, model_used, _ = generate_for_tenant(tenant_id, _general_prompt(normalized_path, original, stack), role="pro")
+        drafted, model_used, _ = generate_for_tenant(
+            tenant_id,
+            _general_prompt(normalized_path, original, stack),
+            role="pro",
+            model_override=selected_model,
+        )
         if drafted:
             patched = _strip_fence(drafted)
             model = model_used
