@@ -31,9 +31,17 @@ PLANS: dict[str, dict[str, Any]] = {
         "price_monthly": 0,
         "daily_incidents": 3,
         "max_projects": 1,
+        "monthly_token_quota": 100_000,
+        "default_model": "deterministic-fast",
+        "allowed_models": [
+            "deterministic-fast",
+            "gemini-flash",
+            "gpt-4o-mini",
+        ],
         "ai_model": "Fast / Deterministic",
         "features": [
             "3 incident runs / day",
+            "100k tokens / month",
             "1 imported repository",
             "Local AST code index",
             "Monaco diff viewer",
@@ -49,12 +57,21 @@ PLANS: dict[str, dict[str, Any]] = {
         "price_monthly": 29,
         "daily_incidents": 25,
         "max_projects": 5,
-        "ai_model": "Gemini 2.5 Pro",
+        "monthly_token_quota": 500_000,
+        "default_model": "gemini-2.5-pro",
+        "allowed_models": [
+            "gemini-2.5-pro",
+            "gemini-flash",
+            "gpt-4o-mini",
+            "claude-3-5-haiku",
+        ],
+        "ai_model": "Gemini 2.5 Pro / GPT-4o Mini",
         "features": [
             "25 incident runs / day",
+            "500k tokens / month",
             "Up to 5 imported repositories",
             "Automated GitHub PR creation",
-            "Gemini 2.5 Pro intelligent repair",
+            "Gemini 2.5 Pro & GPT-4o Mini",
             "Deep AST symbol graph",
             "Priority incident queue",
         ],
@@ -68,10 +85,23 @@ PLANS: dict[str, dict[str, Any]] = {
         "price_monthly": 99,
         "daily_incidents": 100,
         "max_projects": 20,
-        "ai_model": "Gemini Pro + Claude 3.5",
+        "monthly_token_quota": 2_000_000,
+        "default_model": "claude-3-5-sonnet",
+        "allowed_models": [
+            "claude-3-5-sonnet",
+            "gpt-4o",
+            "gemini-2.5-pro",
+            "claude-3-5-haiku",
+            "gpt-4o-mini",
+            "aws-bedrock-claude-3-5",
+        ],
+        "ai_model": "Claude 3.5 Sonnet & GPT-4o",
         "features": [
             "100 incident runs / day",
+            "2 Million tokens / month",
             "Up to 20 imported repositories",
+            "Full Claude 3.5 Sonnet & GPT-4o",
+            "Custom API Key & AWS Bedrock support",
             "E2B cloud execution sandbox",
             "Custom test runners & chaos probes",
             "Multi-branch PR automation",
@@ -83,13 +113,23 @@ PLANS: dict[str, dict[str, Any]] = {
     },
     "pro_max": {
         "id": "pro_max",
-        "name": "Pro Max (Enterprise)",
+        "name": "Enterprise (Pro Max)",
         "price_monthly": 249,
         "daily_incidents": 9999,
         "max_projects": 999,
-        "ai_model": "Multi-Model Consensus",
+        "monthly_token_quota": 10_000_000,
+        "default_model": "multi-model-consensus",
+        "allowed_models": [
+            "claude-3-5-sonnet",
+            "gpt-4o",
+            "gemini-2.5-pro",
+            "aws-bedrock-claude-3-5",
+            "multi-model-consensus",
+        ],
+        "ai_model": "Multi-Model Consensus / Custom Bedrock",
         "features": [
             "Unlimited incident runs & projects",
+            "10 Million tokens / month",
             "AWS 15-minute JIT session minting",
             "Multi-LLM voting consensus",
             "Dedicated Temporal durable worker",
@@ -122,7 +162,7 @@ def _verify_password(password: str, salt: str, expected_hash: str) -> bool:
 class SaaSStore:
     def __init__(self, file_path: Path = DB_FILE) -> None:
         self.file_path = file_path
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._data: dict[str, Any] = {
             "users": {},
             "tenants": {},
@@ -247,6 +287,7 @@ class SaaSStore:
             org_name = (organization_name or f"{name.strip()}'s Workspace").strip()
 
             # Registering user becomes User Admin of their tenant
+            free_plan = PLANS["free"]
             tenant = {
                 "id": tenant_id,
                 "name": org_name,
@@ -254,9 +295,27 @@ class SaaSStore:
                 "plan": "free",
                 "status": "active",
                 "quota_used_today": 0,
-                "quota_limit": PLANS["free"]["daily_incidents"],
+                "quota_limit": free_plan["daily_incidents"],
                 "phone": (phone or "").strip(),
                 "created_at": datetime.now(timezone.utc).isoformat(),
+                "ai_config": {
+                    "provider": "auto",
+                    "active_model": free_plan.get("default_model", "deterministic-fast"),
+                    "api_key": "",
+                    "api_key_source": "none",
+                    "aws_access_key_id": "",
+                    "aws_secret_access_key": "",
+                    "aws_region": "us-east-1",
+                    "monthly_token_quota": free_plan.get("monthly_token_quota", 100_000),
+                },
+                "token_usage": {
+                    "tokens_used_this_month": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "tokens_remaining": free_plan.get("monthly_token_quota", 100_000),
+                    "percent_used": 0.0,
+                    "last_used_at": None,
+                },
             }
             self._data["tenants"][tenant_id] = tenant
 
@@ -398,15 +457,226 @@ class SaaSStore:
             for t in self._data["tenants"].values():
                 owner = self._data["users"].get(t.get("owner_id"), {})
                 projects_count = sum(1 for p in self._data["projects"].values() if p.get("tenant_id") == t["id"])
+                plan_cfg = PLANS.get(t.get("plan", "free"), PLANS["free"])
+                
+                # Ensure ai_config and token_usage exist on tenant
+                ai_cfg = t.setdefault("ai_config", {
+                    "provider": "auto",
+                    "active_model": plan_cfg.get("default_model", "gemini-2.5-pro"),
+                    "api_key": "",
+                    "api_key_source": "none",
+                    "monthly_token_quota": plan_cfg.get("monthly_token_quota", 500_000),
+                })
+                usage = t.setdefault("token_usage", {
+                    "tokens_used_this_month": 0,
+                    "prompt_tokens": 0,
+                    "completion_tokens": 0,
+                    "tokens_remaining": ai_cfg.get("monthly_token_quota", 500_000),
+                    "percent_used": 0.0,
+                    "last_used_at": None,
+                })
+                quota = ai_cfg.get("monthly_token_quota", plan_cfg.get("monthly_token_quota", 500_000))
+                used = usage.get("tokens_used_this_month", 0)
+                usage["tokens_remaining"] = max(0, quota - used)
+                usage["percent_used"] = round((used / quota) * 100, 1) if quota > 0 else 0.0
+
+                raw_key = ai_cfg.get("api_key", "")
+                masked_key = (raw_key[:4] + "..." + raw_key[-4:]) if len(raw_key) > 8 else ("***" if raw_key else "")
+
                 res.append({
                     **t,
                     "owner_name": owner.get("name", "Unknown"),
                     "owner_email": owner.get("email", "Unknown"),
                     "owner_phone": owner.get("phone") or t.get("phone", ""),
                     "projects_count": projects_count,
-                    "plan_info": PLANS.get(t.get("plan", "free"), PLANS["free"]),
+                    "plan_info": plan_cfg,
+                    "ai_summary": {
+                        "provider": ai_cfg.get("provider", "auto"),
+                        "active_model": ai_cfg.get("active_model", plan_cfg.get("default_model")),
+                        "api_key": masked_key,
+                        "has_custom_key": bool(raw_key),
+                        "api_key_source": ai_cfg.get("api_key_source", "none"),
+                        "monthly_token_quota": quota,
+                        "tokens_used_this_month": used,
+                        "tokens_remaining": usage["tokens_remaining"],
+                        "percent_used": usage["percent_used"],
+                    },
                 })
             return sorted(res, key=lambda x: x.get("created_at", ""), reverse=True)
+
+    def get_tenant_ai_config(self, tenant_id: str, mask_key: bool = True) -> dict[str, Any]:
+        with self._lock:
+            tenant = self._data["tenants"].get(tenant_id)
+            if not tenant:
+                raise KeyError(f"Tenant {tenant_id} not found")
+            plan = tenant.get("plan", "free")
+            plan_cfg = PLANS.get(plan, PLANS["free"])
+
+            ai_cfg = tenant.setdefault("ai_config", {
+                "provider": "auto",
+                "active_model": plan_cfg.get("default_model", "gemini-2.5-pro"),
+                "api_key": "",
+                "api_key_source": "none",
+                "aws_access_key_id": "",
+                "aws_secret_access_key": "",
+                "aws_region": "us-east-1",
+                "monthly_token_quota": plan_cfg.get("monthly_token_quota", 500_000),
+            })
+            usage = tenant.setdefault("token_usage", {
+                "tokens_used_this_month": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "tokens_remaining": ai_cfg.get("monthly_token_quota", 500_000),
+                "percent_used": 0.0,
+                "last_used_at": None,
+            })
+
+            quota = ai_cfg.get("monthly_token_quota", plan_cfg.get("monthly_token_quota", 500_000))
+            used = usage.get("tokens_used_this_month", 0)
+            remaining = max(0, quota - used)
+            pct = round((used / quota) * 100, 1) if quota > 0 else 0.0
+            usage["tokens_remaining"] = remaining
+            usage["percent_used"] = pct
+
+            raw_key = ai_cfg.get("api_key", "")
+            masked_key = ""
+            if raw_key:
+                if mask_key:
+                    masked_key = (raw_key[:4] + "..." + raw_key[-4:]) if len(raw_key) > 8 else "***"
+                else:
+                    masked_key = raw_key
+
+            return {
+                "tenant_id": tenant_id,
+                "plan": plan,
+                "plan_name": plan_cfg.get("name", plan),
+                "allowed_models": plan_cfg.get("allowed_models", []),
+                "provider": ai_cfg.get("provider", "auto"),
+                "active_model": ai_cfg.get("active_model", plan_cfg.get("default_model")),
+                "api_key": masked_key,
+                "has_custom_key": bool(raw_key),
+                "api_key_source": ai_cfg.get("api_key_source", "none"),
+                "aws_access_key_id": ai_cfg.get("aws_access_key_id", ""),
+                "aws_region": ai_cfg.get("aws_region", "us-east-1"),
+                "monthly_token_quota": quota,
+                "tokens_used_this_month": used,
+                "prompt_tokens": usage.get("prompt_tokens", 0),
+                "completion_tokens": usage.get("completion_tokens", 0),
+                "tokens_remaining": remaining,
+                "percent_used": pct,
+                "last_used_at": usage.get("last_used_at"),
+            }
+
+    def update_tenant_ai_config(
+        self,
+        tenant_id: str,
+        updates: dict[str, Any],
+        updated_by: str = "user"
+    ) -> dict[str, Any]:
+        with self._lock:
+            tenant = self._data["tenants"].get(tenant_id)
+            if not tenant:
+                raise KeyError(f"Tenant {tenant_id} not found")
+            plan = tenant.get("plan", "free")
+            plan_cfg = PLANS.get(plan, PLANS["free"])
+
+            ai_cfg = tenant.setdefault("ai_config", {
+                "provider": "auto",
+                "active_model": plan_cfg.get("default_model", "gemini-2.5-pro"),
+                "api_key": "",
+                "api_key_source": "none",
+                "aws_access_key_id": "",
+                "aws_secret_access_key": "",
+                "aws_region": "us-east-1",
+                "monthly_token_quota": plan_cfg.get("monthly_token_quota", 500_000),
+            })
+
+            if "active_model" in updates and updates["active_model"]:
+                model = updates["active_model"].strip()
+                if updated_by != "superadmin" and model not in plan_cfg.get("allowed_models", []):
+                    raise ValueError(
+                        f"Model '{model}' is not available on {plan_cfg['name']} plan. "
+                        f"Please upgrade to Ultra or Enterprise for advanced models."
+                    )
+                ai_cfg["active_model"] = model
+
+            if "provider" in updates and updates["provider"]:
+                ai_cfg["provider"] = updates["provider"].strip().lower()
+
+            if "api_key" in updates and updates["api_key"] is not None:
+                new_key = updates["api_key"].strip()
+                if new_key and not new_key.startswith("***") and "..." not in new_key:
+                    ai_cfg["api_key"] = new_key
+                    ai_cfg["api_key_source"] = updated_by
+                elif new_key == "":
+                    ai_cfg["api_key"] = ""
+                    ai_cfg["api_key_source"] = "none"
+
+            if "aws_access_key_id" in updates:
+                ai_cfg["aws_access_key_id"] = (updates["aws_access_key_id"] or "").strip()
+            if "aws_secret_access_key" in updates and updates["aws_secret_access_key"]:
+                sec = updates["aws_secret_access_key"].strip()
+                if sec and not sec.startswith("***"):
+                    ai_cfg["aws_secret_access_key"] = sec
+            if "aws_region" in updates and updates["aws_region"]:
+                ai_cfg["aws_region"] = updates["aws_region"].strip()
+
+            if updated_by == "superadmin":
+                if "monthly_token_quota" in updates and updates["monthly_token_quota"] is not None:
+                    ai_cfg["monthly_token_quota"] = int(updates["monthly_token_quota"])
+                if updates.get("reset_usage"):
+                    tenant["token_usage"] = {
+                        "tokens_used_this_month": 0,
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "tokens_remaining": ai_cfg.get("monthly_token_quota", 500_000),
+                        "percent_used": 0.0,
+                        "last_used_at": None,
+                    }
+
+            self._record_audit_locked(
+                "ai_config_update",
+                f"Tenant {tenant['name']} AI config updated by {updated_by}: model={ai_cfg.get('active_model')}, provider={ai_cfg.get('provider')}"
+            )
+            self._save()
+            return self.get_tenant_ai_config(tenant_id, mask_key=True)
+
+    def record_token_usage(
+        self,
+        tenant_id: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        model: str = "",
+        provider: str = ""
+    ) -> dict[str, Any]:
+        with self._lock:
+            tenant = self._data["tenants"].get(tenant_id)
+            if not tenant:
+                return {}
+
+            plan_cfg = PLANS.get(tenant.get("plan", "free"), PLANS["free"])
+            ai_cfg = tenant.setdefault("ai_config", {})
+            quota = ai_cfg.get("monthly_token_quota", plan_cfg.get("monthly_token_quota", 500_000))
+
+            usage = tenant.setdefault("token_usage", {
+                "tokens_used_this_month": 0,
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "tokens_remaining": quota,
+                "percent_used": 0.0,
+                "last_used_at": None,
+            })
+
+            total_call = prompt_tokens + completion_tokens
+            usage["tokens_used_this_month"] = usage.get("tokens_used_this_month", 0) + total_call
+            usage["prompt_tokens"] = usage.get("prompt_tokens", 0) + prompt_tokens
+            usage["completion_tokens"] = usage.get("completion_tokens", 0) + completion_tokens
+            usage["last_used_at"] = datetime.now(timezone.utc).isoformat()
+            usage["tokens_remaining"] = max(0, quota - usage["tokens_used_this_month"])
+            usage["percent_used"] = round((usage["tokens_used_this_month"] / quota) * 100, 1) if quota > 0 else 0.0
+
+            self._save()
+            return usage
 
     def upgrade_tenant_plan(self, tenant_id: str, new_plan: str, payment_method: str = "card_demo") -> dict[str, Any]:
         with self._lock:
@@ -420,6 +690,13 @@ class SaaSStore:
             plan_cfg = PLANS[new_plan]
             tenant["plan"] = new_plan
             tenant["quota_limit"] = plan_cfg["daily_incidents"]
+            
+            # Automatically adjust AI config quota on plan upgrade
+            ai_cfg = tenant.setdefault("ai_config", {})
+            ai_cfg["monthly_token_quota"] = plan_cfg.get("monthly_token_quota", 500_000)
+            if ai_cfg.get("active_model") not in plan_cfg.get("allowed_models", []):
+                ai_cfg["active_model"] = plan_cfg.get("default_model", "claude-3-5-sonnet")
+
             now = datetime.now(timezone.utc)
             tenant["subscription_started_at"] = now.isoformat()
             if new_plan != "free":

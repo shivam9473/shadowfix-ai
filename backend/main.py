@@ -208,6 +208,24 @@ class UpgradePlanRequest(BaseModel):
     plan: str
     payment_method: str = "card_demo"
 
+class UserAiConfigRequest(BaseModel):
+    provider: str | None = None
+    active_model: str | None = None
+    api_key: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_region: str | None = None
+
+class SuperAdminAiConfigRequest(BaseModel):
+    provider: str | None = None
+    active_model: str | None = None
+    api_key: str | None = None
+    aws_access_key_id: str | None = None
+    aws_secret_access_key: str | None = None
+    aws_region: str | None = None
+    monthly_token_quota: int | None = None
+    reset_usage: bool = False
+
 class RazorpayOrderRequest(BaseModel):
 
     plan: str
@@ -598,6 +616,30 @@ def upgrade_plan(body: UpgradePlanRequest, request: Request) -> dict:
     try:
         res = saas_store.upgrade_tenant_plan(tenant_id, body.plan, body.payment_method)
         return {"status": "ok", **res}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.get("/api/user/ai-config")
+def get_user_ai_config(request: Request) -> dict:
+    """Returns AI model configuration and real-time token tracking for current user's workspace."""
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+    try:
+        return saas_store.get_tenant_ai_config(tenant_id, mask_key=True)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.post("/api/user/ai-config")
+def update_user_ai_config(body: UserAiConfigRequest, request: Request) -> dict:
+    """Allows user to switch allowed AI models or configure their own API key (BYOK)."""
+    user = _require_user(request)
+    tenant_id = user["tenant_id"]
+    updates = body.model_dump(exclude_unset=True)
+    try:
+        updated = saas_store.update_tenant_ai_config(tenant_id, updates, updated_by="user")
+        return {"status": "ok", "config": updated}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except KeyError as exc:
@@ -1017,6 +1059,28 @@ async def superadmin_override_plan(tenant_id: str, request: Request) -> dict:
         raise HTTPException(status_code=400, detail="plan is required")
     res = saas_store.upgrade_tenant_plan(tenant_id, new_plan, payment_method="superadmin_override")
     return {"status": "ok", **res}
+
+@app.get("/api/superadmin/tenants/{tenant_id}/ai-config")
+def superadmin_get_tenant_ai_config(tenant_id: str, request: Request) -> dict:
+    """SuperAdmin views tenant's AI config, active keys, and live token usage metrics."""
+    _admin_guard(request)
+    try:
+        return saas_store.get_tenant_ai_config(tenant_id, mask_key=False)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+@app.post("/api/superadmin/tenants/{tenant_id}/ai-config")
+def superadmin_update_tenant_ai_config(tenant_id: str, body: SuperAdminAiConfigRequest, request: Request) -> dict:
+    """SuperAdmin provisions or overrides tenant's API keys (Anthropic/OpenAI/Bedrock), model, or quota."""
+    _admin_guard(request)
+    updates = body.model_dump(exclude_unset=True)
+    try:
+        updated = saas_store.update_tenant_ai_config(tenant_id, updates, updated_by="superadmin")
+        return {"status": "ok", "config": updated}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @app.post("/api/superadmin/tenants/{tenant_id}/status")
 

@@ -189,6 +189,43 @@ export async function fetchSuperAdminAudit(adminKey) {
   return adminFetch("/api/superadmin/audit", adminKey);
 }
 
+// ── Tenant AI Engine & Token Tracking APIs ──
+export async function fetchUserAiConfig() {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/user/ai-config", {
+    headers: { "X-Session-Token": token },
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Failed to fetch AI configuration.");
+  return body;
+}
+
+export async function updateUserAiConfig(payload) {
+  const token = localStorage.getItem("shadowfix.token") || "";
+  const res = await fetch("/api/user/ai-config", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Session-Token": token,
+    },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json();
+  if (!res.ok) throw new Error(body.detail || "Failed to update AI configuration.");
+  return body;
+}
+
+export async function fetchSuperAdminTenantAiConfig(adminKey, tenantId) {
+  return adminFetch(`/api/superadmin/tenants/${tenantId}/ai-config`, adminKey);
+}
+
+export async function updateSuperAdminTenantAiConfig(adminKey, tenantId, payload) {
+  return adminFetch(`/api/superadmin/tenants/${tenantId}/ai-config`, adminKey, {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // ── Payment Gateway APIs (Razorpay & PayPal) ──
 export async function createRazorpayOrder(planId, currency = "INR") {
   const token = localStorage.getItem("shadowfix.token") || "";

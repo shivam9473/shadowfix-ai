@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from llm.gemini import pro
+from llm.router import generate_for_tenant
 from paths import DATA_DIR, DEMO_ROOT
 from security.guardrails import scan_secrets
 
@@ -42,16 +43,16 @@ def run_coder(
 
     if normalized_path.endswith("demo-shopkart/api/checkout.py") and not project_id:
         patched = _deterministic(original)
-        drafted = pro(_prompt(original, stack))
+        drafted, model_used, _ = generate_for_tenant(tenant_id, _prompt(original, stack), role="pro")
         if drafted and _accept_model_file(drafted):
             patched = _strip_fence(drafted)
-            model = "gemini-2.5-pro"
+            model = model_used
     else:
         # User-imported project repair
-        drafted = pro(_general_prompt(normalized_path, original, stack))
+        drafted, model_used, _ = generate_for_tenant(tenant_id, _general_prompt(normalized_path, original, stack), role="pro")
         if drafted:
             patched = _strip_fence(drafted)
-            model = "gemini-2.5-pro"
+            model = model_used
         else:
             # Deterministic/smart patch fallback for user code
             patched = _smart_user_patch(original, stack, normalized_path)

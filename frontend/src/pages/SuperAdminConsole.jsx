@@ -6,6 +6,8 @@ import {
   fetchSuperAdminMetrics,
   fetchSuperAdminProjects,
   fetchSuperAdminTenants,
+  fetchSuperAdminTenantAiConfig,
+  updateSuperAdminTenantAiConfig,
   overrideTenantPlan,
   runDemo,
   setTenantStatus,
@@ -49,6 +51,62 @@ export default function SuperAdminConsole() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [aiModalTenant, setAiModalTenant] = useState(null);
+  const [aiForm, setAiForm] = useState({
+    provider: "auto",
+    active_model: "gemini-2.5-pro",
+    api_key: "",
+    monthly_token_quota: 500000,
+    reset_usage: false,
+    aws_access_key_id: "",
+    aws_secret_access_key: "",
+    aws_region: "us-east-1",
+  });
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiSaving, setAiSaving] = useState(false);
+  const [aiStats, setAiStats] = useState(null);
+
+  async function handleOpenAiModal(t) {
+    setAiModalTenant(t);
+    setAiLoading(true);
+    setAiStats(null);
+    try {
+      const cfg = await fetchSuperAdminTenantAiConfig(adminKey, t.id);
+      setAiStats(cfg);
+      setAiForm({
+        provider: cfg.provider || "auto",
+        active_model: cfg.active_model || "gemini-2.5-pro",
+        api_key: cfg.api_key || "",
+        monthly_token_quota: cfg.monthly_token_quota || 500000,
+        reset_usage: false,
+        aws_access_key_id: cfg.aws_access_key_id || "",
+        aws_secret_access_key: "",
+        aws_region: cfg.aws_region || "us-east-1",
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAiLoading(false);
+    }
+  }
+
+  async function handleSaveAiModal(e) {
+    e.preventDefault();
+    if (!aiModalTenant) return;
+    setAiSaving(true);
+    setError("");
+    try {
+      await updateSuperAdminTenantAiConfig(adminKey, aiModalTenant.id, aiForm);
+      setMessage(`✓ AI configuration saved for ${aiModalTenant.name}`);
+      setAiModalTenant(null);
+      await loadAll();
+      setTimeout(() => setMessage(""), 4000);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAiSaving(false);
+    }
+  }
 
   async function loadAll(key = adminKey) {
     try {
@@ -396,6 +454,7 @@ export default function SuperAdminConsole() {
                   <th className="px-5 py-3">Owner & Email</th>
                   <th className="px-5 py-3">Projects</th>
                   <th className="px-5 py-3">Current Plan</th>
+                  <th className="px-5 py-3">AI Engine & Tokens</th>
                   <th className="px-5 py-3">Super Admin Plan Override</th>
                   <th className="px-5 py-3">Status</th>
                   <th className="px-5 py-3 text-right">Actions</th>
@@ -422,6 +481,30 @@ export default function SuperAdminConsole() {
                       <span className="rounded-full bg-brand/20 px-2.5 py-0.5 text-mint">
                         {t.plan}
                       </span>
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex flex-col gap-1 min-w-[130px]">
+                        <div className="flex items-center gap-1.5 font-mono text-[11px]">
+                          <span className="font-bold text-mint">{t.ai_summary?.active_model || "gemini-2.5-pro"}</span>
+                          <span className="text-[9px] uppercase px-1 rounded bg-brand/15 text-paper">
+                            {t.ai_summary?.provider || "auto"}
+                          </span>
+                        </div>
+                        <div className="w-full bg-ink rounded-full h-1.5 overflow-hidden border border-line">
+                          <div
+                            className={`h-full rounded-full transition-all ${
+                              (t.ai_summary?.percent_used || 0) > 85 ? "bg-heat" : "bg-mint"
+                            }`}
+                            style={{ width: `${Math.min(100, t.ai_summary?.percent_used || 0)}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between items-center text-[10px] font-mono text-mute">
+                          <span>{((t.ai_summary?.tokens_used_this_month || 0) / 1000).toFixed(1)}k / {((t.ai_summary?.monthly_token_quota || 500000) / 1000).toFixed(0)}k</span>
+                          <span className={(t.ai_summary?.percent_used || 0) > 85 ? "text-heat font-bold" : "text-paper"}>
+                            {t.ai_summary?.percent_used || 0}%
+                          </span>
+                        </div>
+                      </div>
                     </td>
                     <td className="px-5 py-4">
                       <select
@@ -480,6 +563,14 @@ export default function SuperAdminConsole() {
                         title="Send Direct Phone Number SMS"
                       >
                         SMS
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAiModal(t)}
+                        className="ml-1.5 rounded-full bg-brand/20 px-3 py-1 text-xs font-semibold text-mint hover:bg-brand/35 transition"
+                        title="Configure AI Engine, Provider Keys & Token Quotas"
+                      >
+                        AI Config
                       </button>
                     </td>
                   </tr>
@@ -647,6 +738,231 @@ export default function SuperAdminConsole() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── Super Admin AI Engine & Token Provisioning Modal ── */}
+      {aiModalTenant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+          <div className="relative w-full max-w-xl rounded-2xl border border-line bg-panel p-6 shadow-2xl overflow-y-auto max-h-[90vh]">
+            <div className="flex items-start justify-between border-b border-line pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold text-paper font-sans">
+                    AI Engine & Token Provisioning
+                  </h3>
+                  <span className="rounded-full bg-brand/20 px-2.5 py-0.5 text-xs font-mono font-bold text-mint uppercase">
+                    {aiModalTenant.plan} Plan
+                  </span>
+                </div>
+                <p className="mt-1 text-xs text-mute font-mono">
+                  Tenant: <span className="text-paper">{aiModalTenant.name}</span> ({aiModalTenant.id})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAiModalTenant(null)}
+                className="rounded-full p-1.5 text-mute hover:bg-ink hover:text-paper transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {aiLoading ? (
+              <div className="py-12 text-center font-mono text-sm text-mute">
+                Loading tenant AI credentials & quota metrics...
+              </div>
+            ) : (
+              <form onSubmit={handleSaveAiModal} className="mt-5 space-y-4">
+                {/* ── Token Usage Progress Bar ── */}
+                {aiStats && (
+                  <div className="rounded-xl border border-line/60 bg-ink/70 p-4 font-mono">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-mute uppercase text-[10px] tracking-wider">Monthly Token Consumption</span>
+                      <span className={`font-bold ${aiStats.percent_used > 85 ? "text-heat" : "text-mint"}`}>
+                        {aiStats.percent_used}% Used
+                      </span>
+                    </div>
+                    <div className="h-2 w-full overflow-hidden rounded-full bg-panel border border-line/50">
+                      <div
+                        className={`h-full transition-all duration-300 ${
+                          aiStats.percent_used > 85 ? "bg-heat" : "bg-mint"
+                        }`}
+                        style={{ width: `${Math.min(100, aiStats.percent_used)}%` }}
+                      />
+                    </div>
+                    <div className="mt-2 grid grid-cols-3 gap-2 text-center text-[10px]">
+                      <div className="rounded bg-panel/70 p-1.5">
+                        <p className="text-mute">Used This Month</p>
+                        <p className="font-bold text-paper mt-0.5">{(aiStats.tokens_used_this_month).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded bg-panel/70 p-1.5">
+                        <p className="text-mute">Remaining</p>
+                        <p className="font-bold text-mint mt-0.5">{(aiStats.tokens_remaining).toLocaleString()}</p>
+                      </div>
+                      <div className="rounded bg-panel/70 p-1.5">
+                        <p className="text-mute">Quota Limit</p>
+                        <p className="font-bold text-paper mt-0.5">{(aiStats.monthly_token_quota).toLocaleString()}</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-mono text-mute mb-1">
+                      Assigned AI Provider
+                    </label>
+                    <select
+                      value={aiForm.provider}
+                      onChange={(e) => setAiForm({ ...aiForm, provider: e.target.value })}
+                      className="w-full rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
+                    >
+                      <option value="auto">Auto / Multi-Model Fallback</option>
+                      <option value="openai">OpenAI (GPT-4o / GPT-4o-mini)</option>
+                      <option value="anthropic">Anthropic (Claude 3.5 Sonnet / Haiku)</option>
+                      <option value="gemini">Google Gemini (Gemini 2.5 Pro / Flash)</option>
+                      <option value="aws_bedrock">AWS Bedrock Cloud (Enterprise)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-mono text-mute mb-1">
+                      Active Model Architecture
+                    </label>
+                    <select
+                      value={aiForm.active_model}
+                      onChange={(e) => setAiForm({ ...aiForm, active_model: e.target.value })}
+                      className="w-full rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
+                    >
+                      <optgroup label="Ultra & Enterprise Tier (High-Reasoning)">
+                        <option value="claude-3-5-sonnet">Claude 3.5 Sonnet (Anthropic)</option>
+                        <option value="gpt-4o">GPT-4o (OpenAI)</option>
+                        <option value="gemini-2.5-pro">Gemini 2.5 Pro (Google)</option>
+                        <option value="aws-bedrock-claude-3-5">Claude 3.5 on AWS Bedrock</option>
+                      </optgroup>
+                      <optgroup label="Pro & Fast Tier">
+                        <option value="gpt-4o-mini">GPT-4o Mini (OpenAI)</option>
+                        <option value="claude-3-5-haiku">Claude 3.5 Haiku (Anthropic)</option>
+                        <option value="gemini-flash">Gemini 3.8 Flash (Google)</option>
+                      </optgroup>
+                    </select>
+                  </div>
+                </div>
+
+                {/* ── API Key Input (Admin provisioned or BYOK) ── */}
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-mono text-mute">
+                      Dedicated Provider API Key
+                    </label>
+                    {aiStats?.has_custom_key && (
+                      <span className="text-[10px] font-mono text-mint">
+                        ✓ Key active (Source: {aiStats.api_key_source})
+                      </span>
+                    )}
+                  </div>
+                  <input
+                    type="password"
+                    value={aiForm.api_key}
+                    onChange={(e) => setAiForm({ ...aiForm, api_key: e.target.value })}
+                    placeholder={aiStats?.has_custom_key ? "Leave blank to keep current key, or type new key" : "e.g. sk-ant-api03-... or sk-proj-..."}
+                    className="w-full rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
+                  />
+                  <p className="mt-1 text-[10px] text-mute font-mono">
+                    SuperAdmin can provision dedicated Anthropic, OpenAI or Gemini keys per tenant, or let user BYOK.
+                  </p>
+                </div>
+
+                {/* ── AWS Bedrock Cloud Credentials (If Selected) ── */}
+                {aiForm.provider === "aws_bedrock" && (
+                  <div className="rounded-xl border border-line/60 bg-ink/40 p-3 space-y-3 font-mono">
+                    <p className="text-[11px] font-bold text-mint">AWS Bedrock Cloud Credentials</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <label className="text-[10px] text-mute block mb-0.5">AWS Access Key ID</label>
+                        <input
+                          type="text"
+                          value={aiForm.aws_access_key_id}
+                          onChange={(e) => setAiForm({ ...aiForm, aws_access_key_id: e.target.value })}
+                          placeholder="AKIA..."
+                          className="w-full rounded-lg border border-line bg-ink px-2.5 py-1.5 text-xs text-paper focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-mute block mb-0.5">AWS Region</label>
+                        <input
+                          type="text"
+                          value={aiForm.aws_region}
+                          onChange={(e) => setAiForm({ ...aiForm, aws_region: e.target.value })}
+                          placeholder="us-east-1"
+                          className="w-full rounded-lg border border-line bg-ink px-2.5 py-1.5 text-xs text-paper focus:outline-none"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-mute block mb-0.5">AWS Secret Access Key</label>
+                      <input
+                        type="password"
+                        value={aiForm.aws_secret_access_key}
+                        onChange={(e) => setAiForm({ ...aiForm, aws_secret_access_key: e.target.value })}
+                        placeholder="Secret key (leave blank to keep)"
+                        className="w-full rounded-lg border border-line bg-ink px-2.5 py-1.5 text-xs text-paper focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Monthly Quota & Reset ── */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
+                  <div>
+                    <label className="block text-xs font-mono text-mute mb-1">
+                      Monthly Token Quota Limit
+                    </label>
+                    <input
+                      type="number"
+                      step="50000"
+                      min="50000"
+                      value={aiForm.monthly_token_quota}
+                      onChange={(e) => setAiForm({ ...aiForm, monthly_token_quota: parseInt(e.target.value) || 0 })}
+                      className="w-full rounded-xl border border-line bg-ink px-3 py-2 text-xs text-paper focus:border-brand focus:outline-none font-mono"
+                    />
+                  </div>
+
+                  <div className="pt-4">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={aiForm.reset_usage}
+                        onChange={(e) => setAiForm({ ...aiForm, reset_usage: e.target.checked })}
+                        className="rounded border-line bg-ink text-brand focus:ring-0"
+                      />
+                      <span className="text-xs font-mono text-paper">
+                        Reset Token Usage Count to 0
+                      </span>
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 border-t border-line pt-4">
+                  <button
+                    type="button"
+                    onClick={() => setAiModalTenant(null)}
+                    className="rounded-xl border border-line px-4 py-2 text-xs font-semibold text-mute hover:bg-ink hover:text-paper transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={aiSaving}
+                    className="rounded-xl bg-brand px-5 py-2 text-xs font-semibold text-paper hover:bg-brand/80 transition disabled:opacity-50"
+                  >
+                    {aiSaving ? "Saving..." : "Save AI Configuration"}
+                  </button>
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
